@@ -1,7 +1,21 @@
+import { NextResponse, type NextRequest } from 'next/server'
 import { updateSession } from '@/lib/supabase/middleware'
-import { type NextRequest } from 'next/server'
 
 export async function middleware(request: NextRequest) {
+    // GLOBAL PASSWORD PROTECTION
+    // The password is "Insure2026Secure!"
+    const authHeader = request.headers.get('authorization');
+    if (!authHeader || authHeader !== 'Basic ' + Buffer.from('guest:Insure2026Secure!').toString('base64')) {
+        return new NextResponse('Authentication Required', {
+            status: 401,
+            headers: {
+                'Content-Type': 'text/plain',
+                'WWW-Authenticate': 'Basic realm="Secure Site"',
+            },
+        });
+    }
+
+    // Pass through standard middleware if authentication passes...
     return await updateSession(request)
 }
 
