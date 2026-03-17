@@ -1,54 +1,35 @@
 // =============================================
-// Database Types
+// Database Types — M1 v4.1
 // =============================================
 
-export type RunStatus = 'draft' | 'finalizing' | 'finalized' | 'finalizing_failed' | 'cancelled'
+export type RunStatus = 'draft' | 'finalized' | 'archived'
 export type CustomerType = 'individual' | 'corporate'
 export type RunType = 'new_contract' | 'renewal'
 export type CandidateStatus = 'active' | 'excluded'
+export type CandidateRole = 'current' | 'recommended'
 export type OperatorRole = 'agent' | 'manager' | 'admin'
-export type ComplianceMode = 'none' | 'i_compare_info' | 'ro_recommendation'
-export type SignaturePolicy = 'none' | 'optional' | 'required'
-export type DeliveryMethod = 'in_person' | 'email' | 'mail' | 'other'
-export type IntentionConfirmMethod = 'face_to_face' | 'phone' | 'written' | 'other'
+export type ComplianceMode = 'full' | 'exception'
+export type ComparisonScope = 'same_insurer' | 'multi_insurer'
+export type ExportStatus = 'pending' | 'generating' | 'completed' | 'delivered' | 'failed'
 
 export type CustomerDecision =
-    | 'compare_requested'
-    | 'status_quo_selected'
-    | 'delegated_to_agent'
-    | 'externally_designated'
-    | 'new_contract_minimum'
-    | 'limited_by_underwriting'
+    | 'compare'
     | 'renewal_no_change'
-    | 'urgent_by_customer'
     | 'information_refused'
-    | 'other'
-
-export type FinalChoiceReasonCode =
-    | 'existing_relationship'
-    | 'price_priority'
-    | 'coverage_priority'
-    | 'externally_designated'
-    | 'time_constraint'
-    | 'other'
-
-export type DesignationScope = 'insurer' | 'product' | 'other'
-
-export type AlternativeReasonCode =
-    | 'only_available'
-    | 'equivalent_coverage'
-    | 'lowest_premium'
-    | 'customer_preference'
-    | 'other'
+    | 'comparison_waived'
 
 export type AuditEventType =
-    | 'created'
-    | 'updated'
-    | 'finalized'
-    | 'cancelled'
-    | 'whitelist_updated'
-    | 'compare_viewed'
-    | 'alternatives_disclosed'
+    | 'issue_shared'
+    | 'manual_review_completed'
+    | 'insurer_list_presented'
+    | 'customer_intent_confirmed'
+    | 'compare_presented'
+    | 'exclusion_reason_recorded'
+    | 'comparison_waiver_confirmed'
+    | 'consent_important_matters'
+    | 'consent_personal_info'
+    | 'consent_comparison_result'
+    | 'run_finalized'
 
 // =============================================
 // Table Interfaces
@@ -61,7 +42,7 @@ export interface Operator {
     email: string | null
     auth_user_id: string | null
     license_number: string
-    license_valid_until: string
+    license_valid_until: string | null
     role: OperatorRole
     is_active: boolean
     created_at: string
@@ -76,56 +57,58 @@ export interface Run {
     customer_type: CustomerType
     customer_ref: string
     run_type: RunType
-    parent_run_id: string | null
-    amendment_reason: string | null
-    previous_run_id: string | null
     run_status: RunStatus
-    finalized_at: string | null
-    finalized_by: string | null
     compliance_mode: ComplianceMode | null
+    // Step 3: Intent
     customer_decision: CustomerDecision | null
     customer_decision_at: string | null
-    intention_confirmed_at: string | null
-    intention_confirm_method: IntentionConfirmMethod | null
-    intention_summary: string | null
+    customer_intent_memo: string | null
+    // Step 2: Issue Sharing
+    diagnosis_memo: string | null
+    // Step 4: Comparison Scope
+    comparison_scope: ComparisonScope | null
+    comparison_scope_memo: string | null
+    // Step 5: Priority
     priority_factors: string[] | null
-    priority_factors_note: string | null
-    recommended_candidate_id: string | null
-    final_candidate_id: string | null
+    priority_weight: Record<string, number> | null  // keys must be subset of priority_factors
+    // Comparison screen
     compare_presented_at: string | null
-    alternatives_disclosed: boolean
-    compared_company_names: Record<string, string> | null
-    final_choice_reason_code: FinalChoiceReasonCode | null
-    final_choice_reason_text: string | null
-    designation_scope: DesignationScope | null
-    designation_reason: string | null
-    restriction_reason_code: string | null
-    restriction_note: string | null
-    alternative_reason_code: AlternativeReasonCode | null
-    alternative_reason_text: string | null
-    delivered_at: string | null
-    delivery_method: DeliveryMethod | null
-    delivered_recorded_at: string | null
-    delivered_recorded_by: string | null
-    pdf_sha256: string | null
+    // Finalize
+    finalized_at: string | null
+    finalized_by: string | null
     pdf_object_key: string | null
-    signature_policy: SignaturePolicy
-    signature_obtained: boolean
-    signature_obtained_at: string | null
-    signature_obtained_by: string | null
-    kyc_confirmed: boolean
-    kyc_confirmed_at: string | null
+    pdf_sha256: string | null
+    export_status: ExportStatus | null
+    // Meta
     core_logic_version: string
-    reviewed_by: string | null
-    reviewed_at: string | null
-    disadvantage_explained: boolean | null
-    is_manual_entry: boolean
-    manual_reason: string | null
-    exception_flag: boolean
-    exception_reason: string | null
-    exception_approved_by: string | null
-    exception_approved_at: string | null
     is_test: boolean
+    created_at: string
+    updated_at: string
+}
+
+export interface SnapshotFlag {
+    flag_key: string
+    label: string
+    guide_message: string
+}
+
+export interface Snapshot {
+    id: string
+    run_id: string
+    // Import state
+    csv_imported: boolean
+    pdf_object_key: string | null
+    // Core logic output (stored after running diagnosis)
+    missing_flags: SnapshotFlag[]
+    uncertain_flags: SnapshotFlag[]
+    // Manual review outcome (from manual_review_completed event payload)
+    confirmed_items: string[]
+    supplemented_items: string[]
+    unresolved_items: string[]   // non-empty blocks Finalize (Fail-Closed)
+    // Audit
+    reviewed_at: string | null
+    reviewed_by: string | null   // operator id
+    core_logic_version: string
     created_at: string
     updated_at: string
 }
@@ -134,84 +117,75 @@ export interface Candidate {
     id: string
     run_id: string
     slot_no: number
+    role: CandidateRole | null          // 'current' | 'recommended' for same_insurer 2-col view
+    insurer_code: string | null
     insurer_name: string
     product_name: string | null
     annual_premium: number | null
+    diff_flags: Record<string, unknown> | null  // coverage diff data from comparison
+    reason_code: string | null          // selection / exclusion reason in comparison context
     status: CandidateStatus
     excluded_reason: string | null
     excluded_at: string | null
-    excluded_by: string | null
+    excluded_by: string | null          // operator id
     created_at: string
     updated_at: string
-}
-
-export interface Snapshot {
-    id: string
-    run_id: string
-    candidate_id: string
-    product_version: string
-    source_date: string
-    product_name: string
-    annual_cost: number
-    coverage_a: string | null
-    coverage_b: string | null
-    coverage_c: string | null
-    option_a_flag: boolean | null
-    option_b_flag: boolean | null
-    option_c_flag: boolean | null
-    option_c_note: string | null
-    service_note: string | null
-    key_exclusions: string | null
-    completeness_score: number | null
-    core_logic_version: string
-    created_at: string
-    updated_at: string
-}
-
-export interface RunParticipant {
-    id: string
-    run_id: string
-    operator_id: string
-    role: 'primary' | 'co' | 'reviewer'
-    joined_at: string
 }
 
 export interface AuditEvent {
     id: string
     run_id: string
-    entity_type: string
-    entity_id: string
     event_type: AuditEventType
-    field_name: string | null
-    old_value: Record<string, unknown> | null
-    new_value: Record<string, unknown> | null
     operator_id: string
+    payload: Record<string, unknown> | null
     occurred_at: string
-    ip_address: string | null
-}
-
-export interface RestrictionReasonMaster {
-    code: string
-    label: string
-    is_active: boolean
-    sort_order: number
 }
 
 export interface AgencyConfig {
     id: string
     agency_id: string
     agency_name: string
-    signature_policy: SignaturePolicy
     created_at: string
     updated_at: string
 }
 
 // =============================================
-// Form / Insert types
+// Minimal Proof PDF Stub (exception routes)
 // =============================================
 
-export type RunInsert = Omit<Run, 'id' | 'created_at' | 'updated_at' | 'finalized_at' | 'finalized_by' | 'delivered_recorded_at' | 'delivered_recorded_by' | 'signature_obtained_at' | 'signature_obtained_by' | 'kyc_confirmed_at' | 'exception_approved_at' | 'reviewed_at' | 'customer_decision_at' | 'compare_presented_at' | 'excluded_at'>
+export interface MinimalProofPdfStub {
+    run_id: string
+    customer_ref: string
+    operator_name: string
+    generated_at: string
+    customer_decision: CustomerDecision
+    decision_reason: string
+    insurer_list_presented: boolean
+    insurer_names?: string[]
+    consent_important_matters?: boolean
+    consent_personal_info?: boolean
+    consent_comparison_result?: boolean
+}
+
+// =============================================
+// Form / Insert Types
+// =============================================
+
+export type RunInsert = Pick<Run,
+    | 'agency_id'
+    | 'operator_id'
+    | 'product_line'
+    | 'customer_type'
+    | 'customer_ref'
+    | 'run_type'
+    | 'is_test'
+    | 'core_logic_version'
+>
 
 export type RunUpdate = Partial<Omit<Run, 'id' | 'agency_id' | 'operator_id' | 'created_at'>>
 
+export type SnapshotInsert = Omit<Snapshot, 'id' | 'created_at' | 'updated_at'>
+
 export type CandidateInsert = Omit<Candidate, 'id' | 'created_at' | 'updated_at' | 'excluded_at' | 'excluded_by'>
+
+export type AuditEventInsert = Omit<AuditEvent, 'id' | 'occurred_at'>
