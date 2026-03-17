@@ -1,7 +1,7 @@
 'use client'
 
 import { useState } from 'react'
-import { LuXCircle, LuTriangleAlert, LuChevronDown, LuChevronUp, LuShieldAlert } from 'lucide-react'
+import { XCircle, TriangleAlert, ChevronDown, ChevronUp, ShieldAlert } from 'lucide-react'
 import type { SnapshotFlag } from '@/lib/types'
 import type { Locale } from '@/lib/i18n'
 
@@ -36,9 +36,9 @@ function FlagRow({ flag, type }: FlagRowProps) {
             >
                 <div className="flex items-center gap-2">
                     {isMissing ? (
-                        <LuXCircle className="text-red-500 shrink-0" size={16} />
+                        <XCircle className="text-red-500 shrink-0" size={16} />
                     ) : (
-                        <LuTriangleAlert className="text-amber-500 shrink-0" size={16} />
+                        <TriangleAlert className="text-amber-500 shrink-0" size={16} />
                     )}
                     <span className={`text-sm font-medium ${isMissing ? 'text-red-800' : 'text-amber-800'}`}>
                         {flag.label}
@@ -49,7 +49,7 @@ function FlagRow({ flag, type }: FlagRowProps) {
                     <span className="text-xs text-gray-400 font-mono">{flag.flag_key}</span>
                 </div>
                 <span className="text-gray-400 shrink-0">
-                    {expanded ? <LuChevronUp size={14} /> : <LuChevronDown size={14} />}
+                    {expanded ? <ChevronUp size={14} /> : <ChevronDown size={14} />}
                 </span>
             </button>
 
@@ -79,7 +79,7 @@ export default function RecruiterGuidance({
     if (!hasMissing && !hasUncertain && !hasUnresolved) {
         return (
             <div className="rounded-lg border border-green-200 bg-green-50 p-3 text-sm text-green-700 flex items-center gap-2">
-                <LuShieldAlert className="text-green-500" size={16} />
+                <ShieldAlert className="text-green-500" size={16} />
                 {locale === 'ja' ? '診断フラグなし — 全項目確認済みです' : 'No diagnostic flags — all items confirmed'}
             </div>
         )
@@ -91,7 +91,7 @@ export default function RecruiterGuidance({
             {hasUnresolved && (
                 <div className="rounded-lg border border-red-400 bg-red-100 p-4">
                     <div className="flex items-start gap-2">
-                        <LuShieldAlert className="text-red-600 mt-0.5 shrink-0" size={18} />
+                        <ShieldAlert className="text-red-600 mt-0.5 shrink-0" size={18} />
                         <div>
                             <p className="text-sm font-bold text-red-800">
                                 {locale === 'ja'

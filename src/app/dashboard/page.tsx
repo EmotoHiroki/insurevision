@@ -56,14 +56,15 @@ export default function DashboardPage() {
     const counts = {
         draft: runs.filter(r => r.run_status === 'draft').length,
         finalized: runs.filter(r => r.run_status === 'finalized').length,
-        failed: runs.filter(r => r.run_status === 'finalizing_failed').length,
+        archived: runs.filter(r => r.run_status === 'archived').length,
         total: runs.length,
     }
 
     const statusLabel = (status: string) => {
         const map: Record<string, string> = {
-            draft: t('draft'), finalizing: t('finalizing'), finalized: t('finalized'),
-            finalizing_failed: t('finalizingFailed'), cancelled: t('cancelled'),
+            draft: t('draft'),
+            finalized: t('finalized'),
+            archived: t('archived'),
         }
         return map[status] || status
     }
@@ -134,7 +135,7 @@ export default function DashboardPage() {
                     {[
                         { label: t('draft'), count: counts.draft, color: 'var(--status-draft)', icon: LuFilePenLine },
                         { label: t('finalized'), count: counts.finalized, color: 'var(--status-finalized)', icon: LuCircleCheck },
-                        { label: t('finalizingFailed'), count: counts.failed, color: 'var(--status-failed)', icon: LuTriangleAlert },
+                        { label: t('archived'), count: counts.archived, color: 'var(--text-secondary)', icon: LuTriangleAlert },
                         { label: t('all'), count: counts.total, color: 'var(--info)', icon: LuList },
                     ].map((stat, i) => (
                         <div key={i} className="card-hover" style={{
@@ -159,7 +160,7 @@ export default function DashboardPage() {
 
                 {/* Filter tabs */}
                 <div style={{ display: 'flex', gap: 8, marginBottom: 16 }}>
-                    {['all', 'draft', 'finalized', 'finalizing_failed', 'cancelled'].map(s => (
+                    {['all', 'draft', 'finalized', 'archived'].map(s => (
                         <button
                             key={s}
                             onClick={() => setStatusFilter(s)}
@@ -218,9 +219,8 @@ export default function DashboardPage() {
                                         <td>{run.run_type === 'new_contract' ? t('newContract') : t('renewal')}</td>
                                         <td style={{ fontSize: 13, color: 'var(--text-secondary)' }}>
                                             {run.compliance_mode
-                                                ? run.compliance_mode === 'ro_recommendation' ? t('roRecommendation')
-                                                    : run.compliance_mode === 'i_compare_info' ? t('iCompareInfo')
-                                                        : t('complianceNone')
+                                                ? run.compliance_mode === 'full' ? t('complianceFull')
+                                                    : t('complianceException')
                                                 : '—'}
                                         </td>
                                         <td style={{ fontSize: 13, color: 'var(--text-secondary)' }}>

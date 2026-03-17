@@ -2,395 +2,537 @@
 
 import { useState } from 'react'
 import { useRouter } from 'next/navigation'
+import {
+    Shield, Globe, ArrowLeft, Check,
+    User, Building, FilePlus, RefreshCw,
+} from 'lucide-react'
 import { createClient } from '@/lib/supabase/client'
 import { useLocale } from '@/lib/locale-context'
-import {
-    LuShield, LuGlobe, LuArrowLeft, LuChevronRight, LuUser, LuBuilding,
-    LuFilePlus, LuRefreshCw, LuCheck, LuSave,
-} from 'react-icons/lu'
+import Step1Diagnosis, { type Step1Data } from './_steps/Step1Diagnosis'
+import Step2IssueSharing from './_steps/Step2IssueSharing'
+import Step3Intent, { type Step3Data } from './_steps/Step3Intent'
+import Step4Scope, { type Step4Data } from './_steps/Step4Scope'
+import Step5Priority, { type Step5Data } from './_steps/Step5Priority'
+import type { CustomerType, RunType, CustomerDecision, AuditEventInsert } from '@/lib/types'
+
+// ─────────────────────────────────────────────
+// Wizard step definitions
+// ─────────────────────────────────────────────
+const STEPS = [
+    { num: 1, labelJa: '診断', labelEn: 'Diagnosis' },
+    { num: 2, labelJa: '課題共有', labelEn: 'Issue Sharing' },
+    { num: 3, labelJa: '顧客意向', labelEn: 'Intent' },
+    { num: 4, labelJa: '比較範囲', labelEn: 'Scope' },
+    { num: 5, labelJa: '重視事項', labelEn: 'Priority' },
+]
 
 export default function NewRunPage() {
     const router = useRouter()
-    const { t, toggleLocale, locale } = useLocale()
-    const [step, setStep] = useState(0)
-    const [loading, setLoading] = useState(false)
-    const [error, setError] = useState('')
+    const { locale, toggleLocale } = useLocale()
 
-    // Form state
-    const [customerType, setCustomerType] = useState<'individual' | 'corporate'>('individual')
+    // ── Customer basics (collected before Step 1) ──
+    const [customerType, setCustomerType] = useState<CustomerType>('individual')
     const [customerRef, setCustomerRef] = useState('')
-    const [runType, setRunType] = useState<'new_contract' | 'renewal'>('new_contract')
-    const [kycConfirmed, setKycConfirmed] = useState(false)
+    const [runType, setRunType] = useState<RunType>('new_contract')
     const [isTest, setIsTest] = useState(false)
+    const [basicsError, setBasicsError] = useState('')
+    const [basicsComplete, setBasicsComplete] = useState(false)
 
-    // Step 2: Intention
-    const [customerDecision, setCustomerDecision] = useState('')
-    const [intentionMethod, setIntentionMethod] = useState('')
-    const [intentionSummary, setIntentionSummary] = useState('')
-    const [priorityFactors, setPriorityFactors] = useState<string[]>([])
+    // ── Wizard state ──
+    const [step, setStep] = useState<1 | 2 | 3 | 4 | 5>(1)
 
-    const steps = [t('basicInfo'), t('intentionConfirmation'), t('candidates'), t('finalize')]
+    // ── Per-step collected data ──
+    const [step1Data, setStep1Data] = useState<Step1Data | null>(null)
+    const [diagnosisMemo, setDiagnosisMemo] = useState('')
+    const [step3Data, setStep3Data] = useState<Step3Data | null>(null)
+    const [step4Data, setStep4Data] = useState<Step4Data | null>(null)
 
-    const handleCreateRun = async () => {
-        if (!customerRef.trim()) { setError(t('fieldRequired')); return }
-        setLoading(true)
-        setError('')
+    // ── Async state ──
+    const [submitting, setSubmitting] = useState(false)
+    const [submitError, setSubmitError] = useState('')
+
+    // ─────────────────────────────────────────────
+    // Basics confirmation
+    // ─────────────────────────────────────────────
+    const confirmBasics = () => {
+        if (!customerRef.trim()) {
+            setBasicsError(locale === 'ja' ? '顧客参照IDを入力してください' : 'Please enter a customer reference')
+            return
+        }
+        setBasicsError('')
+        setBasicsComplete(true)
+    }
+
+    // ─────────────────────────────────────────────
+    // Step handlers
+    // ─────────────────────────────────────────────
+    const handleStep1Complete = (data: Step1Data) => {
+        setStep1Data(data)
+        setStep(2)
+    }
+
+    const handleStep2Complete = (memo: string) => {
+        setDiagnosisMemo(memo)
+        setStep(3)
+    }
+
+    const handleStep3Complete = async (data: Step3Data) => {
+        setStep3Data(data)
+        // DB writes happen here
+        await createRunAndFireEvents(data)
+    }
+
+    const handleStep4Complete = async (data: Step4Data) => {
+        setStep4Data(data)
+        // UPDATE run with scope data
+        await updateRunScope(data)
+    }
+
+    const handleStep5Complete = async (data: Step5Data) => {
+        // UPDATE run with priority data then navigate to comparison
+        await updateRunPriority(data)
+    }
+
+    // ─────────────────────────────────────────────
+    // createRunAndFireEvents — called at Step3 completion
+    // Batch: INSERT run + snapshot + 4 audit events
+    // ─────────────────────────────────────────────
+    const createRunAndFireEvents = async (intentData: Step3Data) => {
+        if (!step1Data) return
+        setSubmitting(true)
+        setSubmitError('')
+
         try {
             const supabase = createClient()
             const { data: { user } } = await supabase.auth.getUser()
             if (!user) throw new Error('Not authenticated')
 
-            const { data: op } = await supabase
-                .from('operator').select('*').eq('auth_user_id', user.id).single()
+            const { data: op, error: opErr } = await supabase
+                .from('operator')
+                .select('*')
+                .eq('auth_user_id', user.id)
+                .single()
+            if (opErr || !op) throw new Error('Operator not found')
 
-            const { data: run, error: err } = await supabase.from('run').insert({
+            // ── 1. INSERT run ──
+            const { data: run, error: runErr } = await supabase.from('run').insert({
                 agency_id: op.agency_id,
                 operator_id: op.id,
+                product_line: 'auto',   // Phase 2: make configurable
                 customer_type: customerType,
                 customer_ref: customerRef.trim(),
                 run_type: runType,
-                kyc_confirmed: kycConfirmed,
                 is_test: isTest,
-                customer_decision: customerDecision || null,
-                intention_confirm_method: intentionMethod || null,
-                intention_summary: intentionSummary || null,
-                priority_factors: priorityFactors.length > 0 ? priorityFactors : null,
                 core_logic_version: '1.0.0',
+                customer_decision: intentData.customerDecision,
+                customer_decision_at: new Date().toISOString(),
+                customer_intent_memo: intentData.customerIntentMemo,
+                diagnosis_memo: diagnosisMemo,
+                run_status: 'draft',
+                export_status: 'pending',
             }).select().single()
+            if (runErr || !run) throw runErr ?? new Error('Run insert failed')
 
-            if (err) throw err
+            const runId: string = run.id
 
-            // Add primary participant
-            await supabase.from('run_participant').insert({
-                run_id: run.id, operator_id: op.id, role: 'primary',
+            // ── 2. INSERT snapshot ──
+            const { error: snapErr } = await supabase.from('snapshot').insert({
+                run_id: runId,
+                csv_imported: step1Data.csvImported,
+                pdf_object_key: step1Data.pdfObjectKey || null,
+                missing_flags: step1Data.missingFlags,
+                uncertain_flags: step1Data.uncertainFlags,
+                confirmed_items: step1Data.confirmedItems,
+                supplemented_items: step1Data.supplementedItems,
+                unresolved_items: step1Data.unresolvedItems,
+                reviewed_at: new Date().toISOString(),
+                reviewed_by: op.id,
+                core_logic_version: '1.0.0',
             })
+            if (snapErr) throw snapErr
 
-            // Audit log
-            await supabase.from('audit_event').insert({
-                run_id: run.id, entity_type: 'run', entity_id: run.id,
-                event_type: 'created', operator_id: op.id,
-            })
+            // ── 3–6. Batch INSERT audit events ──
+            const events: AuditEventInsert[] = [
+                {
+                    run_id: runId,
+                    event_type: 'manual_review_completed' as const,
+                    operator_id: op.id,
+                    payload: {
+                        confirmed_items: step1Data.confirmedItems,
+                        supplemented_items: step1Data.supplementedItems,
+                        unresolved_items: step1Data.unresolvedItems,
+                    },
+                },
+                {
+                    run_id: runId,
+                    event_type: 'issue_shared' as const,
+                    operator_id: op.id,
+                    payload: { diagnosis_memo: diagnosisMemo },
+                },
+                // insurer_list_presented auto-fires at Step2→Step3 transition for ALL paths
+                {
+                    run_id: runId,
+                    event_type: 'insurer_list_presented' as const,
+                    operator_id: op.id,
+                    payload: { auto_recorded: true },
+                },
+                {
+                    run_id: runId,
+                    event_type: 'customer_intent_confirmed' as const,
+                    operator_id: op.id,
+                    payload: {
+                        decision: intentData.customerDecision,
+                        memo: intentData.customerIntentMemo,
+                    },
+                },
+            ]
 
-            router.push(`/run/${run.id}?tab=candidates`)
+            // comparison_waiver_confirmed event for comparison_waived path
+            if (intentData.customerDecision === 'comparison_waived') {
+                events.push({
+                    run_id: runId,
+                    event_type: 'comparison_waiver_confirmed' as const,
+                    operator_id: op.id,
+                    payload: {
+                        consent_important_matters: intentData.consentState.importantMatters,
+                        consent_personal_info: intentData.consentState.personalInfo,
+                    },
+                })
+            }
+
+            const { error: eventsErr } = await supabase.from('audit_event').insert(events)
+            if (eventsErr) throw eventsErr
+
+            // ── Branch on customer decision ──
+            const decision: CustomerDecision = intentData.customerDecision
+
+            if (decision === 'compare') {
+                // Normal path → continue to Step 4
+                setStep3Data(intentData)
+                setStep(4)
+                // Store runId for Steps 4+5
+                sessionStorage.setItem('wip_run_id', runId)
+                sessionStorage.setItem('wip_op_id', op.id)
+            } else {
+                // Exception routes → finalize immediately
+                const consentFlags = {
+                    comparison_result: false,
+                    important_matters: intentData.consentState.importantMatters,
+                    personal_info: intentData.consentState.personalInfo,
+                }
+                const res = await fetch('/api/finalize', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({
+                        runId,
+                        operatorId: op.id,
+                        consentFlags,
+                        exceptionRoute: true,
+                    }),
+                })
+                if (!res.ok) {
+                    const body = await res.json()
+                    throw new Error(body.error ?? 'Finalize failed')
+                }
+                router.push(`/run/${runId}`)
+            }
         } catch (err: unknown) {
-            setError(err instanceof Error ? err.message : t('error'))
-        } finally { setLoading(false) }
+            setSubmitError(err instanceof Error ? err.message : 'An error occurred')
+        } finally {
+            setSubmitting(false)
+        }
     }
 
+    // ─────────────────────────────────────────────
+    // updateRunScope — called at Step4 completion
+    // ─────────────────────────────────────────────
+    const updateRunScope = async (data: Step4Data) => {
+        const runId = sessionStorage.getItem('wip_run_id')
+        if (!runId) return
+        setSubmitting(true)
+        setSubmitError('')
+        try {
+            const supabase = createClient()
+            const { error } = await supabase.from('run').update({
+                comparison_scope: data.comparisonScope,
+                comparison_scope_memo: data.comparisonScopeMemo || null,
+            }).eq('id', runId)
+            if (error) throw error
+            setStep4Data(data)
+            setStep(5)
+        } catch (err: unknown) {
+            setSubmitError(err instanceof Error ? err.message : 'An error occurred')
+        } finally {
+            setSubmitting(false)
+        }
+    }
+
+    // ─────────────────────────────────────────────
+    // updateRunPriority — called at Step5 completion
+    // ─────────────────────────────────────────────
+    const updateRunPriority = async (data: Step5Data) => {
+        const runId = sessionStorage.getItem('wip_run_id')
+        if (!runId) return
+        setSubmitting(true)
+        setSubmitError('')
+        try {
+            const supabase = createClient()
+            const { error } = await supabase.from('run').update({
+                priority_factors: data.priorityFactors,
+                priority_weight: data.priorityWeight,
+            }).eq('id', runId)
+            if (error) throw error
+            router.push(`/run/${runId}?tab=comparison`)
+        } catch (err: unknown) {
+            setSubmitError(err instanceof Error ? err.message : 'An error occurred')
+        } finally {
+            setSubmitting(false)
+        }
+    }
+
+    // ─────────────────────────────────────────────
+    // Sidebar step label helper
+    // ─────────────────────────────────────────────
+    const isStepDimmed = (stepNum: number) => {
+        // Steps 4-5 are dimmed when decision is non-compare (or not yet selected)
+        if (stepNum >= 4) {
+            if (!step3Data) return true
+            if (step3Data.customerDecision !== 'compare') return true
+        }
+        return false
+    }
+
+    // ─────────────────────────────────────────────
+    // Render
+    // ─────────────────────────────────────────────
     return (
-        <div style={{ minHeight: '100vh', background: 'var(--surface)' }}>
+        <div className="min-h-screen bg-gray-50">
             {/* Header */}
-            <header style={{
-                background: 'var(--primary)', color: 'white', padding: '0 24px', height: 56,
-                display: 'flex', alignItems: 'center', justifyContent: 'space-between',
-                boxShadow: '0 2px 8px rgba(0,0,0,0.15)',
-            }}>
-                <div style={{ display: 'flex', alignItems: 'center', gap: 12 }}>
-                    <button onClick={() => router.push('/dashboard')} style={{
-                        background: 'rgba(255,255,255,0.1)', border: 'none', color: 'white',
-                        padding: '6px 10px', borderRadius: 6, cursor: 'pointer',
-                    }}>
-                        <LuArrowLeft size={18} />
+            <header className="bg-blue-700 text-white h-14 flex items-center justify-between px-6 shadow-md">
+                <div className="flex items-center gap-3">
+                    <button
+                        onClick={() => router.push('/dashboard')}
+                        className="bg-white/10 hover:bg-white/20 border-0 text-white p-2 rounded cursor-pointer"
+                    >
+                        <ArrowLeft size={18} />
                     </button>
-                    <LuShield size={18} />
-                    <span style={{ fontWeight: 600 }}>{t('newRun')}</span>
+                    <Shield size={18} />
+                    <span className="font-semibold">
+                        {locale === 'ja' ? '新規案件' : 'New Run'}
+                    </span>
                 </div>
-                <button onClick={toggleLocale} style={{
-                    background: 'rgba(255,255,255,0.1)', border: 'none', color: 'rgba(255,255,255,0.8)',
-                    padding: '6px 12px', borderRadius: 6, cursor: 'pointer', display: 'flex',
-                    alignItems: 'center', gap: 4, fontSize: 12,
-                }}>
-                    <LuGlobe size={14} /> {locale === 'ja' ? 'EN' : 'JA'}
+                <button
+                    onClick={toggleLocale}
+                    className="bg-white/10 hover:bg-white/20 border-0 text-white/80 px-3 py-1.5 rounded text-xs flex items-center gap-1 cursor-pointer"
+                >
+                    <Globe size={14} />
+                    {locale === 'ja' ? 'EN' : 'JA'}
                 </button>
             </header>
 
-            <div style={{ display: 'flex', maxWidth: 1280, margin: '0 auto' }}>
+            <div className="flex max-w-5xl mx-auto">
                 {/* Sidebar Stepper */}
-                <div style={{ width: 260, background: 'white', minHeight: 'calc(100vh - 56px)', borderRight: '1px solid var(--border)', paddingTop: 24 }}>
-                    {steps.map((label, i) => {
-                        const isClickable = i <= step && i < 2;
+                <div className="w-56 bg-white min-h-[calc(100vh-56px)] border-r border-gray-200 pt-6 shrink-0">
+                    {STEPS.map(({ num, labelJa, labelEn }) => {
+                        const completed = step > num
+                        const active = step === num
+                        const dimmed = isStepDimmed(num)
                         return (
                             <div
-                                key={i}
-                                className={`stepper-item ${i === step ? 'active' : ''} ${i < step ? 'completed' : ''}`}
-                                onClick={() => isClickable && setStep(i)}
-                                style={{ cursor: isClickable ? 'pointer' : 'default', opacity: i > step ? 0.4 : 1 }}
+                                key={num}
+                                className={`flex items-center gap-3 px-4 py-3 ${dimmed ? 'opacity-35' : ''}`}
                             >
-                                <div className="stepper-circle">
-                                    {i < step ? <LuCheck size={14} /> : i + 1}
+                                <div
+                                    className={`w-7 h-7 rounded-full flex items-center justify-center text-xs font-bold shrink-0 ${
+                                        completed
+                                            ? 'bg-green-500 text-white'
+                                            : active
+                                            ? 'bg-blue-600 text-white'
+                                            : 'bg-gray-200 text-gray-500'
+                                    }`}
+                                >
+                                    {completed ? <Check size={13} /> : num}
                                 </div>
-                                <span style={{ fontSize: 14, fontWeight: i === step ? 600 : 400, color: i === step ? 'var(--primary)' : 'var(--text-secondary)' }}>
-                                    {label}
+                                <span
+                                    className={`text-sm ${
+                                        active ? 'font-semibold text-blue-700' : 'text-gray-500'
+                                    }`}
+                                >
+                                    {locale === 'ja' ? labelJa : labelEn}
                                 </span>
                             </div>
                         )
                     })}
                 </div>
 
-                {/* Content */}
-                <div style={{ flex: 1, padding: 32 }}>
-                    <div className="animate-fade-in">
-                        {step === 0 && (
+                {/* Main content */}
+                <div className="flex-1 p-8">
+                    {/* Customer basics — shown above Step 1 if not confirmed */}
+                    {!basicsComplete && (
+                        <div className="space-y-5 mb-8 p-6 bg-white rounded-xl border border-gray-200 shadow-sm">
+                            <h2 className="text-base font-semibold text-gray-800">
+                                {locale === 'ja' ? '基本情報' : 'Basic Information'}
+                            </h2>
+
+                            {/* Customer type */}
                             <div>
-                                <h2 style={{ fontSize: 22, fontWeight: 700, color: 'var(--primary-dark)', marginBottom: 8 }}>
-                                    {t('basicInfo')}
-                                </h2>
-                                <p style={{ fontSize: 14, color: 'var(--text-secondary)', marginBottom: 32 }}>
-                                    {locale === 'ja' ? '案件の基本情報を入力してください' : 'Enter basic case information'}
-                                </p>
-
-                                {/* Customer Type */}
-                                <div className="section-card">
-                                    <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginBottom: 16 }}>
-                                        <LuUser size={18} color="var(--primary)" />
-                                        <span style={{ fontWeight: 600 }}>{t('customerType')}</span>
-                                        <span className="badge-required">{t('required')}</span>
-                                    </div>
-                                    <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 12 }}>
-                                        <div
-                                            className={`radio-card ${customerType === 'individual' ? 'selected' : ''}`}
-                                            onClick={() => setCustomerType('individual')}
+                                <label className="form-label">
+                                    {locale === 'ja' ? '顧客種別' : 'Customer Type'}
+                                    <span className="badge-required">
+                                        {locale === 'ja' ? '必須' : 'Required'}
+                                    </span>
+                                </label>
+                                <div className="grid grid-cols-2 gap-3 mt-2">
+                                    {(
+                                        [
+                                            { value: 'individual', icon: User, labelJa: '個人', labelEn: 'Individual' },
+                                            { value: 'corporate', icon: Building, labelJa: '法人', labelEn: 'Corporate' },
+                                        ] as const
+                                    ).map(({ value, icon: Icon, labelJa, labelEn }) => (
+                                        <label
+                                            key={value}
+                                            className={`radio-card cursor-pointer flex items-center gap-2 ${
+                                                customerType === value ? 'ring-2 ring-blue-500' : ''
+                                            }`}
                                         >
-                                            <LuUser size={20} color={customerType === 'individual' ? 'var(--primary)' : '#999'} />
-                                            <span style={{ fontWeight: customerType === 'individual' ? 600 : 400 }}>{t('individual')}</span>
-                                        </div>
-                                        <div
-                                            className={`radio-card ${customerType === 'corporate' ? 'selected' : ''}`}
-                                            onClick={() => setCustomerType('corporate')}
-                                        >
-                                            <LuBuilding size={20} color={customerType === 'corporate' ? 'var(--primary)' : '#999'} />
-                                            <span style={{ fontWeight: customerType === 'corporate' ? 600 : 400 }}>{t('corporate')}</span>
-                                        </div>
-                                    </div>
-                                </div>
-
-                                {/* Customer Ref */}
-                                <div className="section-card">
-                                    <label className="form-label">
-                                        {t('customerRef')} <span className="badge-required">{t('required')}</span>
-                                    </label>
-                                    <input
-                                        className="form-input"
-                                        value={customerRef}
-                                        onChange={e => setCustomerRef(e.target.value)}
-                                        placeholder="例: C-2026-0001"
-                                    />
-                                </div>
-
-                                {/* Run Type */}
-                                <div className="section-card">
-                                    <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginBottom: 16 }}>
-                                        <span style={{ fontWeight: 600 }}>{t('runType')}</span>
-                                        <span className="badge-required">{t('required')}</span>
-                                    </div>
-                                    <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 12 }}>
-                                        <div
-                                            className={`radio-card ${runType === 'new_contract' ? 'selected' : ''}`}
-                                            onClick={() => setRunType('new_contract')}
-                                        >
-                                            <LuFilePlus size={20} color={runType === 'new_contract' ? 'var(--primary)' : '#999'} />
-                                            <span>{t('newContract')}</span>
-                                        </div>
-                                        <div
-                                            className={`radio-card ${runType === 'renewal' ? 'selected' : ''}`}
-                                            onClick={() => setRunType('renewal')}
-                                        >
-                                            <LuRefreshCw size={20} color={runType === 'renewal' ? 'var(--primary)' : '#999'} />
-                                            <span>{t('renewal')}</span>
-                                        </div>
-                                    </div>
-                                </div>
-
-                                {/* KYC & Test */}
-                                <div className="section-card">
-                                    <div style={{ display: 'flex', alignItems: 'center', gap: 12, marginBottom: 12 }}>
-                                        <input type="checkbox" id="kyc" checked={kycConfirmed}
-                                            onChange={e => setKycConfirmed(e.target.checked)}
-                                            style={{ width: 18, height: 18, accentColor: 'var(--primary)' }}
-                                        />
-                                        <label htmlFor="kyc" style={{ fontWeight: 500, cursor: 'pointer' }}>{t('kycConfirmed')}</label>
-                                    </div>
-                                    <div style={{ display: 'flex', alignItems: 'center', gap: 12 }}>
-                                        <input type="checkbox" id="test" checked={isTest}
-                                            onChange={e => setIsTest(e.target.checked)}
-                                            style={{ width: 18, height: 18, accentColor: 'var(--warning)' }}
-                                        />
-                                        <label htmlFor="test" style={{ cursor: 'pointer' }}>
-                                            <span style={{ fontWeight: 500 }}>{t('testData')}</span>
-                                            <span style={{ fontSize: 12, color: 'var(--text-secondary)', marginLeft: 8 }}>
-                                                {t('testDataNote')}
+                                            <input
+                                                type="radio"
+                                                name="customerType"
+                                                value={value}
+                                                checked={customerType === value}
+                                                onChange={() => setCustomerType(value)}
+                                                className="sr-only"
+                                            />
+                                            <Icon size={18} className={customerType === value ? 'text-blue-600' : 'text-gray-400'} />
+                                            <span className="text-sm font-medium">
+                                                {locale === 'ja' ? labelJa : labelEn}
                                             </span>
                                         </label>
-                                    </div>
-                                </div>
-
-                                {error && (
-                                    <div style={{
-                                        background: 'rgba(198,40,40,0.08)', color: 'var(--error)',
-                                        padding: '10px 14px', borderRadius: 8, fontSize: 13, marginBottom: 16,
-                                    }}>
-                                        {error}
-                                    </div>
-                                )}
-
-                                <div style={{ display: 'flex', justifyContent: 'flex-end', gap: 12, marginTop: 24 }}>
-                                    <button className="btn-secondary" onClick={() => router.push('/dashboard')}>
-                                        {t('cancel')}
-                                    </button>
-                                    <button className="btn-primary" onClick={() => {
-                                        if (!customerRef.trim()) { setError(t('fieldRequired')); return; }
-                                        setError('');
-                                        setStep(1);
-                                    }}>
-                                        <LuChevronRight size={16} /> {t('next')}
-                                    </button>
+                                    ))}
                                 </div>
                             </div>
-                        )}
 
-                        {step === 1 && (
+                            {/* Customer ref */}
                             <div>
-                                <h2 style={{ fontSize: 22, fontWeight: 700, color: 'var(--primary-dark)', marginBottom: 8 }}>
-                                    {t('intentionConfirmation')}
-                                </h2>
-                                <p style={{ fontSize: 14, color: 'var(--text-secondary)', marginBottom: 32 }}>
-                                    {runType === 'new_contract' ? t('step2NewTitle') : t('step2ExistTitle')}
-                                </p>
-
-                                {/* Decision options */}
-                                <div className="section-card">
-                                    <div style={{ fontWeight: 600, marginBottom: 16 }}>{t('step1Title')}</div>
-                                    <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
-                                        {(runType === 'new_contract'
-                                            ? [
-                                                { key: 'compare_requested', label: t('compareRequested') },
-                                                { key: 'externally_designated', label: t('externallyDesignated') },
-                                                { key: 'urgent_by_customer', label: t('urgentByCustomer') },
-                                                { key: 'new_contract_minimum', label: t('newContractMinimum') },
-                                                { key: 'information_refused', label: t('informationRefused') },
-                                            ]
-                                            : [
-                                                { key: 'compare_requested', label: t('compareRequested') },
-                                                { key: 'status_quo_selected', label: t('statusQuoSelected') },
-                                                { key: 'delegated_to_agent', label: t('delegatedToAgent') },
-                                                { key: 'renewal_no_change', label: t('renewalNoChange') },
-                                                { key: 'externally_designated', label: t('externallyDesignated') },
-                                            ]
-                                        ).map(opt => (
-                                            <div
-                                                key={opt.key}
-                                                className={`radio-card ${customerDecision === opt.key ? 'selected' : ''}`}
-                                                onClick={() => setCustomerDecision(opt.key)}
-                                            >
-                                                <div style={{
-                                                    width: 18, height: 18, borderRadius: '50%', border: `2px solid ${customerDecision === opt.key ? 'var(--primary)' : '#ccc'}`,
-                                                    display: 'flex', alignItems: 'center', justifyContent: 'center',
-                                                }}>
-                                                    {customerDecision === opt.key && <div style={{ width: 10, height: 10, borderRadius: '50%', background: 'var(--primary)' }} />}
-                                                </div>
-                                                <span>{opt.label}</span>
-                                            </div>
-                                        ))}
-                                    </div>
-                                </div>
-
-                                {/* Confirmation Method */}
-                                <div className="section-card">
-                                    <label className="form-label">{t('intentionConfirmMethod')}</label>
-                                    <select className="form-select" value={intentionMethod} onChange={e => setIntentionMethod(e.target.value)}>
-                                        <option value="">---</option>
-                                        <option value="face_to_face">{t('faceToFace')}</option>
-                                        <option value="phone">{t('phone')}</option>
-                                        <option value="written">{t('written')}</option>
-                                        <option value="other">{t('otherMethod')}</option>
-                                    </select>
-                                </div>
-
-                                {/* Priority Factors */}
-                                <div className="section-card">
-                                    <label className="form-label">{t('priorityFactors')}</label>
-                                    <div style={{ display: 'flex', flexWrap: 'wrap', gap: 8 }}>
-                                        {['premium', 'coverage', 'deductible', 'service', 'claimsHandling', 'paymentRecord'].map(f => (
-                                            <button
-                                                key={f}
-                                                onClick={() => setPriorityFactors(prev =>
-                                                    prev.includes(f) ? prev.filter(x => x !== f) : [...prev, f]
-                                                )}
-                                                style={{
-                                                    padding: '6px 14px', borderRadius: 20, border: 'none', fontSize: 13,
-                                                    cursor: 'pointer', fontWeight: 500,
-                                                    background: priorityFactors.includes(f) ? 'var(--primary)' : '#e8eaf6',
-                                                    color: priorityFactors.includes(f) ? 'white' : 'var(--primary)',
-                                                }}
-                                            >
-                                                {t(f as 'premium')}
-                                            </button>
-                                        ))}
-                                    </div>
-                                </div>
-
-                                {/* Summary */}
-                                <div className="section-card">
-                                    <label className="form-label">
-                                        {t('intentionSummary')} <span className="badge-required">≥15{locale === 'ja' ? '文字' : ' chars'}</span>
-                                    </label>
-                                    <textarea
-                                        className="form-input"
-                                        rows={4}
-                                        value={intentionSummary}
-                                        onChange={e => setIntentionSummary(e.target.value)}
-                                        placeholder={locale === 'ja' ? 'お客様の意向を要旨として記録してください（15文字以上）' : 'Record customer intention summary (15+ chars)'}
-                                    />
-                                    <div style={{ fontSize: 12, color: intentionSummary.length < 15 ? 'var(--error)' : 'var(--success)', marginTop: 4 }}>
-                                        {intentionSummary.length} / 15 min
-                                    </div>
-                                </div>
-
-                                <div style={{ display: 'flex', justifyContent: 'flex-end', gap: 12, marginTop: 24 }}>
-                                    <button className="btn-secondary" onClick={() => setStep(0)}>
-                                        {t('back')}
-                                    </button>
-                                    <button className="btn-primary" onClick={handleCreateRun} disabled={loading || !customerDecision || intentionSummary.length < 15}>
-                                        {loading ? <span className="animate-pulse-soft">{t('loading')}</span> : (
-                                            <><LuSave size={16} /> {locale === 'ja' ? '案件を保存して候補入力へ' : 'Save & Edit Candidates'}</>
-                                        )}
-                                    </button>
-                                </div>
+                                <label className="form-label">
+                                    {locale === 'ja' ? '顧客参照ID' : 'Customer Reference'}
+                                    <span className="badge-required">
+                                        {locale === 'ja' ? '必須' : 'Required'}
+                                    </span>
+                                </label>
+                                <input
+                                    type="text"
+                                    value={customerRef}
+                                    onChange={(e) => { setCustomerRef(e.target.value); setBasicsError('') }}
+                                    placeholder={locale === 'ja' ? '例: C-2026-0001' : 'e.g. C-2026-0001'}
+                                    className="form-input"
+                                />
                             </div>
-                        )}
 
-                        {step === 2 && (
+                            {/* Run type */}
                             <div>
-                                <h2 style={{ fontSize: 22, fontWeight: 700, color: 'var(--primary-dark)', marginBottom: 8 }}>
-                                    {t('candidates')}
-                                </h2>
-                                <p style={{ fontSize: 14, color: 'var(--text-secondary)', marginBottom: 32 }}>
-                                    {locale === 'ja' ? '案件を保存してから候補を追加してください' : 'Save the case first, then add candidates'}
-                                </p>
-                                <div className="section-card" style={{ textAlign: 'center', padding: 48 }}>
-                                    <p style={{ color: 'var(--text-secondary)', marginBottom: 16 }}>
-                                        {locale === 'ja' ? '案件を先に保存する必要があります' : 'Please save the case first'}
-                                    </p>
-                                    <button className="btn-primary" onClick={handleCreateRun} disabled={loading}>
-                                        <LuSave size={16} /> {locale === 'ja' ? '案件を保存して候補入力へ' : 'Save & go to candidates'}
-                                    </button>
+                                <label className="form-label">
+                                    {locale === 'ja' ? '案件種別' : 'Run Type'}
+                                    <span className="badge-required">
+                                        {locale === 'ja' ? '必須' : 'Required'}
+                                    </span>
+                                </label>
+                                <div className="grid grid-cols-2 gap-3 mt-2">
+                                    {(
+                                        [
+                                            { value: 'new_contract', icon: FilePlus, labelJa: '新規契約', labelEn: 'New Contract' },
+                                            { value: 'renewal', icon: RefreshCw, labelJa: '更新', labelEn: 'Renewal' },
+                                        ] as const
+                                    ).map(({ value, icon: Icon, labelJa, labelEn }) => (
+                                        <label
+                                            key={value}
+                                            className={`radio-card cursor-pointer flex items-center gap-2 ${
+                                                runType === value ? 'ring-2 ring-blue-500' : ''
+                                            }`}
+                                        >
+                                            <input
+                                                type="radio"
+                                                name="runType"
+                                                value={value}
+                                                checked={runType === value}
+                                                onChange={() => setRunType(value)}
+                                                className="sr-only"
+                                            />
+                                            <Icon size={18} className={runType === value ? 'text-blue-600' : 'text-gray-400'} />
+                                            <span className="text-sm font-medium">
+                                                {locale === 'ja' ? labelJa : labelEn}
+                                            </span>
+                                        </label>
+                                    ))}
                                 </div>
                             </div>
-                        )}
 
-                        {step === 3 && (
-                            <div>
-                                <h2 style={{ fontSize: 22, fontWeight: 700, color: 'var(--primary-dark)', marginBottom: 8 }}>
-                                    {t('finalize')}
-                                </h2>
-                                <div className="section-card" style={{ textAlign: 'center', padding: 48 }}>
-                                    <p style={{ color: 'var(--text-secondary)' }}>
-                                        {locale === 'ja' ? '案件を作成してから確定操作を行ってください' : 'Create the case first before finalizing'}
-                                    </p>
+                            {/* Test flag */}
+                            <label className="flex items-center gap-3 cursor-pointer">
+                                <input
+                                    type="checkbox"
+                                    checked={isTest}
+                                    onChange={(e) => setIsTest(e.target.checked)}
+                                    className="w-4 h-4 rounded"
+                                />
+                                <span className="text-sm text-gray-700">
+                                    {locale === 'ja' ? 'テストデータ（本番集計に含まれません）' : 'Test data (excluded from production stats)'}
+                                </span>
+                            </label>
+
+                            {basicsError && <p className="form-error">{basicsError}</p>}
+
+                            <button
+                                type="button"
+                                onClick={confirmBasics}
+                                className="btn-primary w-full"
+                            >
+                                {locale === 'ja' ? '基本情報を確定して診断へ' : 'Confirm & Start Diagnosis'}
+                            </button>
+                        </div>
+                    )}
+
+                    {/* Step content — only rendered after basics are confirmed */}
+                    {basicsComplete && (
+                        <div>
+                            {submitError && (
+                                <div className="mb-4 px-4 py-3 bg-red-50 border border-red-200 rounded-lg text-sm text-red-700">
+                                    {submitError}
                                 </div>
-                            </div>
-                        )}
-                    </div>
+                            )}
+
+                            {submitting && (
+                                <div className="mb-4 px-4 py-3 bg-blue-50 border border-blue-200 rounded-lg text-sm text-blue-700">
+                                    {locale === 'ja' ? '保存中...' : 'Saving...'}
+                                </div>
+                            )}
+
+                            {step === 1 && (
+                                <Step1Diagnosis locale={locale} onComplete={handleStep1Complete} />
+                            )}
+                            {step === 2 && step1Data && (
+                                <Step2IssueSharing
+                                    locale={locale}
+                                    missingFlags={step1Data.missingFlags}
+                                    uncertainFlags={step1Data.uncertainFlags}
+                                    onComplete={handleStep2Complete}
+                                />
+                            )}
+                            {step === 3 && (
+                                <Step3Intent
+                                    locale={locale}
+                                    runType={runType}
+                                    onComplete={handleStep3Complete}
+                                />
+                            )}
+                            {step === 4 && (
+                                <Step4Scope locale={locale} onComplete={handleStep4Complete} />
+                            )}
+                            {step === 5 && (
+                                <Step5Priority locale={locale} onComplete={handleStep5Complete} />
+                            )}
+                        </div>
+                    )}
                 </div>
             </div>
         </div>

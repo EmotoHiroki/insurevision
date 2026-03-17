@@ -1,0 +1,141 @@
+import { createServerSupabaseClient } from '@/lib/supabase/server'
+import type { Run, Snapshot, MinimalProofPdfStub } from '@/lib/types'
+
+// ─────────────────────────────────────────────
+// POST /api/finalize
+// Body: {
+//   runId: string,
+//   operatorId: string,
+//   consentFlags: { comparison_result: boolean, important_matters: boolean, personal_info: boolean },
+//   exceptionRoute: boolean,
+// }
+// ─────────────────────────────────────────────
+export async function POST(request: Request) {
+    try {
+        const { runId, operatorId, consentFlags, exceptionRoute } = await request.json()
+
+        if (!runId || !operatorId) {
+            return Response.json({ error: 'runId and operatorId are required' }, { status: 400 })
+        }
+
+        const supabase = await createServerSupabaseClient()
+
+        // ── Validation ──
+        const { data: run, error: runErr } = await supabase
+            .from('run').select('*').eq('id', runId).single()
+        if (runErr || !run) return Response.json({ error: 'run not found' }, { status: 404 })
+
+        if (run.run_status !== 'draft') {
+            return Response.json({ error: 'already finalized' }, { status: 400 })
+        }
+
+        const { data: snapshot } = await supabase
+            .from('snapshot').select('*').eq('run_id', runId).maybeSingle()
+
+        // Fail-Closed: unresolved_items must be empty
+        if (snapshot && snapshot.unresolved_items.length > 0) {
+            return Response.json(
+                { error: 'unresolved_items', items: snapshot.unresolved_items },
+                { status: 422 }
+            )
+        }
+
+        // Normal path: compare_presented_at must be set
+        if (!exceptionRoute && !run.compare_presented_at) {
+            return Response.json({ error: 'compare_presented_at not set' }, { status: 422 })
+        }
+
+        // ── Build minimal proof stub ──
+        const pdfStub = buildMinimalProofStub(run as Run, snapshot as Snapshot | null, consentFlags)
+        const pdfJson = JSON.stringify(pdfStub)
+
+        // SHA-256 using Web Crypto API (available in edge/Node environments)
+        const encoder = new TextEncoder()
+        const data = encoder.encode(pdfJson)
+        const hashBuffer = await crypto.subtle.digest('SHA-256', data)
+        const hashArray = Array.from(new Uint8Array(hashBuffer))
+        const pdfSha256 = hashArray.map(b => b.toString(16).padStart(2, '0')).join('')
+        const pdfObjectKey = `runs/${runId}/proof.json`
+
+        // ── Atomic finalize via RPC ──
+        const { error: rpcErr } = await supabase.rpc('finalize_run', {
+            p_run_id: runId,
+            p_pdf_object_key: pdfObjectKey,
+            p_pdf_sha256: pdfSha256,
+            p_operator_id: operatorId,
+            p_consent_comparison_result: consentFlags.comparison_result ?? false,
+        })
+        if (rpcErr) return Response.json({ error: rpcErr.message }, { status: 500 })
+
+        // ── Additional consent events (outside transaction) ──
+        const additionalEvents = []
+        if (consentFlags.important_matters) {
+            additionalEvents.push({
+                run_id: runId,
+                event_type: 'consent_important_matters' as const,
+                operator_id: operatorId,
+                payload: { obtained_at: new Date().toISOString() },
+            })
+        }
+        if (consentFlags.personal_info) {
+            additionalEvents.push({
+                run_id: runId,
+                event_type: 'consent_personal_info' as const,
+                operator_id: operatorId,
+                payload: { obtained_at: new Date().toISOString() },
+            })
+        }
+        if (additionalEvents.length > 0) {
+            await supabase.from('audit_event').insert(additionalEvents)
+        }
+
+        return Response.json({ success: true, pdfObjectKey, pdfSha256 })
+    } catch (err: unknown) {
+        console.error('[finalize] unexpected error:', err)
+        return Response.json(
+            { error: err instanceof Error ? err.message : 'Internal server error' },
+            { status: 500 }
+        )
+    }
+}
+
+// ─────────────────────────────────────────────
+// buildMinimalProofStub — pure function, no DB calls
+// ─────────────────────────────────────────────
+function buildMinimalProofStub(
+    run: Run,
+    snapshot: Snapshot | null,
+    consentFlags: { comparison_result: boolean; important_matters: boolean; personal_info: boolean }
+): MinimalProofPdfStub {
+    const stub: MinimalProofPdfStub = {
+        run_id: run.id,
+        customer_ref: run.customer_ref,
+        operator_name: run.operator_id,   // Phase 2: resolve to actual name
+        generated_at: new Date().toISOString(),
+        customer_decision: run.customer_decision!,
+        decision_reason: run.customer_intent_memo ?? '',
+        insurer_list_presented: true,   // always true: auto-recorded at Step2→3 for all paths
+    }
+
+    // comparison_waived path: include consent flags
+    if (run.customer_decision === 'comparison_waived') {
+        stub.consent_important_matters = consentFlags.important_matters
+        stub.consent_personal_info = consentFlags.personal_info
+    }
+
+    // compare path: include comparison_result consent
+    if (run.customer_decision === 'compare') {
+        stub.consent_comparison_result = consentFlags.comparison_result
+    }
+
+    // Snapshot data for traceability
+    if (snapshot) {
+        Object.assign(stub, {
+            confirmed_items: snapshot.confirmed_items,
+            supplemented_items: snapshot.supplemented_items,
+            core_logic_version: snapshot.core_logic_version,
+        })
+    }
+
+    return stub
+}
