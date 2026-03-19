@@ -88,7 +88,7 @@ export default function RunDetailPage() {
     // Comparison tab actions
     // ─────────────────────────────────────────────
     const handleAddCandidate = async () => {
-        if (!newInsurerName.trim() || !operator || !run) return
+        if (!newInsurerName.trim() || !run) return
         setSaving(true)
         try {
             const supabase = createClient()
@@ -102,6 +102,7 @@ export default function RunDetailPage() {
                 status: 'active',
             }).select().single()
             if (err) throw err
+            if (!data) throw new Error('候補の追加に失敗しました / Failed to add candidate')
             setCandidates(prev => [...prev, data as Candidate])
             setNewInsurerName('')
             setNewProductName('')
@@ -488,8 +489,8 @@ export default function RunDetailPage() {
                             </div>
                         )}
 
-                        {/* Add candidate form (only before compare_presented_at) */}
-                        {isEditable && !run.compare_presented_at && (
+                        {/* Add candidate form (multi_insurer only, before compare_presented_at) */}
+                        {isEditable && !run.compare_presented_at && run.comparison_scope !== 'same_insurer' && (
                             <div className="section-card">
                                 <h3 style={{ fontSize: 15, fontWeight: 600, marginBottom: 12 }}>
                                     <LuPlus size={14} style={{ display: 'inline', marginRight: 6 }} />
