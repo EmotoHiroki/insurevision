@@ -1,5 +1,5 @@
 /**
- * InsureVision M1 v4.1 — Acceptance Tests TC1–TC11
+ * InsureVision M1 v4.1 — Pure-Logic Invariant Tests
  * =====================================================================
  * 【テスト種別の位置づけ】
  *
@@ -7,10 +7,10 @@
  *   ビジネスロジック層の「純粋ロジック単体検証」です。
  *   データベース・HTTPサーバーへの接続は一切行いません。
  *   (pure-logic layer only — no DB, no HTTP server)
- *   各TCのロジック不変条件（Fail-Closed動作、イベント発火ルール、
+ *   ロジック不変条件（Fail-Closed動作、イベント発火ルール、
  *   バリデーションゲート、PDF stubの内容）を自動検証します。
  *
- * ■ 受入テスト証跡（別紙）
+ * ■ 受入テスト証跡（別紙 TC_EVIDENCE.md）
  *   実際の画面操作・目視確認による手動テストの結果です。
  *   ブラウザ上でウィザードを操作し、DBへの記録・UIの挙動を
  *   スクリーンショット付きで確認したものです。
@@ -19,10 +19,16 @@
  * ありません。
  * =====================================================================
  *
- * TC番号はM1設計書 v4.1 の定義に準拠します:
- *   TC10 = uncertain項目が残ったままFinalizeを試みて失敗するケース
- *   TC11 = manual_review_completed記録済みだがunresolved_itemsが
- *          残っている状態でFinalize不可（独立したゲート）
+ * 【TC番号との対応について】
+ *   M1 v4.1 設計書 Section 6 の TC1–TC11 はブラウザ上の
+ *   エンドツーエンドシナリオです。純粋ロジックテストでは
+ *   画面遷移・DB書き込みを再現できないため、TC1–TC9 は
+ *   個別の不変条件テストとして記述しています。
+ *
+ *   TC10・TC11 のみ、設計書のシナリオ番号に完全準拠します:
+ *     TC10 = uncertain項目が残ったままFinalizeを試みて失敗するケース
+ *     TC11 = manual_review_completed記録済みだがunresolved_itemsが
+ *            残っている状態でFinalize不可（独立したゲート）
  */
 
 import { describe, it, expect } from 'vitest'
@@ -187,10 +193,10 @@ function validatePriorityWeight(
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
-// TC1 — insurer_list_presented fires for ALL customer_decision paths
-//        (全経路でStep2→Step3遷移時に自動記録される)
+// INVARIANT: insurer_list_presented fires for ALL customer_decision paths
+//            (全経路でStep2→Step3遷移時に自動記録される)
 // ─────────────────────────────────────────────────────────────────────────────
-describe('TC1 — insurer_list_presented fires for all decision paths', () => {
+describe('insurer_list_presented fires for all decision paths', () => {
     const decisions: CustomerDecision[] = [
         'compare',
         'renewal_no_change',
@@ -215,9 +221,9 @@ describe('TC1 — insurer_list_presented fires for all decision paths', () => {
 })
 
 // ─────────────────────────────────────────────────────────────────────────────
-// TC2 — renewal_no_change は renewal 案件種別でのみ選択可能
+// INVARIANT: renewal_no_change は renewal 案件種別でのみ選択可能
 // ─────────────────────────────────────────────────────────────────────────────
-describe('TC2 — renewal_no_change availability by run_type', () => {
+describe('renewal_no_change availability by run_type', () => {
     it('new_contract → renewal_no_change NOT available', () => {
         const options = availableDecisions('new_contract')
         expect(options).not.toContain('renewal_no_change')
@@ -234,9 +240,9 @@ describe('TC2 — renewal_no_change availability by run_type', () => {
 })
 
 // ─────────────────────────────────────────────────────────────────────────────
-// TC3 — comparison_waiver_confirmed は comparison_waived 経路のみ発火
+// INVARIANT: comparison_waiver_confirmed は comparison_waived 経路のみ発火
 // ─────────────────────────────────────────────────────────────────────────────
-describe('TC3 — comparison_waiver_confirmed fires only for comparison_waived', () => {
+describe('comparison_waiver_confirmed fires only for comparison_waived', () => {
     it('comparison_waived → batch includes comparison_waiver_confirmed with consent payload', () => {
         const batch = buildAuditEventBatch(
             'run-001', 'op-001',
@@ -275,10 +281,10 @@ describe('TC3 — comparison_waiver_confirmed fires only for comparison_waived',
 })
 
 // ─────────────────────────────────────────────────────────────────────────────
-// TC4 — information_refused 経路の監査イベントバッチ構成
-//        (insurer_list_presented が含まれること、過不足ないこと)
+// INVARIANT: information_refused 経路の監査イベントバッチ構成
+//            (insurer_list_presented が含まれること、過不足ないこと)
 // ─────────────────────────────────────────────────────────────────────────────
-describe('TC4 — information_refused audit event batch structure', () => {
+describe('information_refused audit event batch structure', () => {
     it('batch contains exactly the 4 required events in order', () => {
         const batch = buildAuditEventBatch(
             'run-001', 'op-001',
@@ -317,10 +323,10 @@ describe('TC4 — information_refused audit event batch structure', () => {
 })
 
 // ─────────────────────────────────────────────────────────────────────────────
-// TC5 — MinimalProofPdfStub の内容が経路ごとに正しいこと
-//        (例外経路 PDF stub の構造検証)
+// INVARIANT: MinimalProofPdfStub の内容が経路ごとに正しいこと
+//            (例外経路 PDF stub の構造検証)
 // ─────────────────────────────────────────────────────────────────────────────
-describe('TC5 — MinimalProofPdfStub content per decision path', () => {
+describe('MinimalProofPdfStub content per decision path', () => {
     const baseRun = {
         id: 'run-abc',
         customer_ref: 'C-2026-0001',
@@ -402,9 +408,9 @@ describe('TC5 — MinimalProofPdfStub content per decision path', () => {
 })
 
 // ─────────────────────────────────────────────────────────────────────────────
-// TC6 — customerIntentMemo 最小15文字バリデーション
+// INVARIANT: customerIntentMemo 最小15文字バリデーション
 // ─────────────────────────────────────────────────────────────────────────────
-describe('TC6 — customerIntentMemo minimum 15 characters', () => {
+describe('customerIntentMemo minimum 15 characters', () => {
     const validate = (memo: string) => memo.trim().length >= 15
 
     it('14 chars → invalid', () => {
@@ -426,9 +432,9 @@ describe('TC6 — customerIntentMemo minimum 15 characters', () => {
 })
 
 // ─────────────────────────────────────────────────────────────────────────────
-// TC7 — priority_weight のキーは priority_factors の strict subset でなければならない
+// INVARIANT: priority_weight のキーは priority_factors の strict subset でなければならない
 // ─────────────────────────────────────────────────────────────────────────────
-describe('TC7 — priority_weight key-subset validation', () => {
+describe('priority_weight key-subset validation', () => {
     it('weight keys ⊆ factors → valid', () => {
         const result = validatePriorityWeight(
             ['premium', 'coverage_amount', 'rider_options'],
@@ -463,9 +469,9 @@ describe('TC7 — priority_weight key-subset validation', () => {
 })
 
 // ─────────────────────────────────────────────────────────────────────────────
-// TC8 — 二重Finalize拒否（確定済み案件への再確定操作は 400 を返す）
+// INVARIANT: 二重Finalize拒否（確定済み案件への再確定操作は 400 を返す）
 // ─────────────────────────────────────────────────────────────────────────────
-describe('TC8 — double-finalize blocked (idempotency)', () => {
+describe('double-finalize blocked (idempotency)', () => {
     it('run_status=finalized → 400 already finalized', () => {
         const result = validateFinalizeRequest({
             run: {
@@ -495,10 +501,9 @@ describe('TC8 — double-finalize blocked (idempotency)', () => {
 })
 
 // ─────────────────────────────────────────────────────────────────────────────
-// TC9 — compare経路は compare_presented_at が必須
-//        (例外経路はスキップ可)
+// INVARIANT: compare経路は compare_presented_at が必須（例外経路はスキップ可）
 // ─────────────────────────────────────────────────────────────────────────────
-describe('TC9 — compare path requires compare_presented_at', () => {
+describe('compare path requires compare_presented_at', () => {
     it('normal route, compare_presented_at=null → 422', () => {
         const result = validateFinalizeRequest({
             run: { run_status: 'draft', customer_decision: 'compare', compare_presented_at: null },
