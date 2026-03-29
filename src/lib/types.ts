@@ -1,12 +1,21 @@
 // =============================================
-// Database Types — M1 v4.1
+// Database Types — M2 v1.0
 // =============================================
 
 export type RunStatus = 'draft' | 'finalized' | 'archived'
 export type CustomerType = 'individual' | 'corporate'
 export type RunType = 'new_contract' | 'renewal'
 export type CandidateStatus = 'active' | 'excluded'
-export type CandidateRole = 'current' | 'recommended'
+export type CandidateRole =
+    | 'current'           // M1 legacy (multi_insurer runs)
+    | 'recommended'       // M1 legacy (multi_insurer runs)
+    | 'prior'             // M2: same_insurer —前年契約（readonly）
+    | 'same_conditions'   // M2: same_insurer — 前年同条件（保険料のみ入力可）
+    | 'recommended_1'     // M2: same_insurer — おすすめ1
+    | 'recommended_2'     // M2: same_insurer — おすすめ2
+    | 'recommended_3'     // M2: same_insurer — おすすめ3
+export type CoverageStatus = 'full' | 'partial' | 'none'
+export type DeliveryMethod = 'hand' | 'mail' | 'email' | 'digital'
 export type OperatorRole = 'agent' | 'manager' | 'admin'
 export type ComplianceMode = 'full' | 'exception'
 export type ComparisonScope = 'same_insurer' | 'multi_insurer'
@@ -30,6 +39,8 @@ export type AuditEventType =
     | 'consent_personal_info'
     | 'consent_comparison_result'
     | 'run_finalized'
+    | 'delivery_recorded'               // M2: 交付記録
+    | 'redundancy_resolution_recorded'  // M2: 重複補償判定記録
 
 // =============================================
 // Table Interfaces
@@ -71,8 +82,13 @@ export interface Run {
     // Step 5: Priority
     priority_factors: string[] | null
     priority_weight: Record<string, number> | null  // keys must be subset of priority_factors
+    // M2: Step 1 — 前提条件変更メモ（renewal時のみ）
+    condition_change_note: string | null
     // Comparison screen
     compare_presented_at: string | null
+    // M2: 交付記録
+    delivery_method: DeliveryMethod | null
+    delivery_confirmed_at: string | null
     // Finalize
     finalized_at: string | null
     finalized_by: string | null
@@ -84,6 +100,12 @@ export interface Run {
     is_test: boolean
     created_at: string
     updated_at: string
+}
+
+export interface RedundancyDecision {
+    item_key: string
+    decision: 'keep' | 'remove'
+    reason: string
 }
 
 export interface SnapshotFlag {
@@ -105,6 +127,9 @@ export interface Snapshot {
     confirmed_items: string[]
     supplemented_items: string[]
     unresolved_items: string[]   // non-empty blocks Finalize (Fail-Closed)
+    // M2: 課題解消メモ・重複補償判定
+    resolution_memo: string | null
+    redundancy_decisions: RedundancyDecision[]
     // Audit
     reviewed_at: string | null
     reviewed_by: string | null   // operator id
@@ -124,6 +149,9 @@ export interface Candidate {
     annual_premium: number | null
     diff_flags: Record<string, unknown> | null  // coverage diff data from comparison
     reason_code: string | null          // selection / exclusion reason in comparison context
+    // M2: 付帯状況3値化・車両別前提条件
+    coverage_status: CoverageStatus | null
+    vehicle_premises: Record<string, unknown>[] | null
     status: CandidateStatus
     excluded_reason: string | null
     excluded_at: string | null

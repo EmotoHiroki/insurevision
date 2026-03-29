@@ -50,6 +50,9 @@ export default function RunDetailPage() {
     // Finalize tab
     const [consentComparisonResult, setConsentComparisonResult] = useState(false)
     const [finalizing, setFinalizing] = useState(false)
+    // M2 Spec 2: 課題解消メモ
+    const [resolutionMemo, setResolutionMemo] = useState('')
+    const [savingMemo, setSavingMemo] = useState(false)
 
     // ─────────────────────────────────────────────
     const showToast = (msg: string, type: 'success' | 'error' = 'success') => {
@@ -70,7 +73,10 @@ export default function RunDetailPage() {
         if (runData) setRun(runData as Run)
 
         const { data: snapData } = await supabase.from('snapshot').select('*').eq('run_id', runId).maybeSingle()
-        if (snapData) setSnapshot(snapData as Snapshot)
+        if (snapData) {
+            setSnapshot(snapData as Snapshot)
+            setResolutionMemo((snapData as Snapshot).resolution_memo ?? '')
+        }
 
         const { data: candData } = await supabase.from('candidate').select('*').eq('run_id', runId).order('slot_no')
         setCandidates((candData as Candidate[]) || [])
@@ -220,6 +226,13 @@ export default function RunDetailPage() {
             labelJa: '比較提示が記録されている（比較経路）',
             labelEn: 'Compare presentation recorded (compare path)',
             pass: run.customer_decision !== 'compare' || !!run.compare_presented_at,
+        },
+        // M2 Spec 5: insurer_list_presented must be recorded
+        {
+            id: 'insurer_list_presented',
+            labelJa: '取扱保険会社案内が記録されている',
+            labelEn: 'Insurer list presentation recorded',
+            pass: auditEvents.some(e => e.event_type === 'insurer_list_presented'),
         },
     ] : []
 
@@ -648,6 +661,43 @@ export default function RunDetailPage() {
                                             </li>
                                         ))}
                                     </ul>
+                                </div>
+
+                                {/* M2 Spec 2: 課題解消メモ */}
+                                <div className="section-card space-y-2">
+                                    <label style={{ fontSize: 14, fontWeight: 600, display: 'block' }}>
+                                        {locale === 'ja' ? '課題解消メモ（任意）' : 'Issue resolution memo (optional)'}
+                                    </label>
+                                    <p style={{ fontSize: 12, color: 'var(--text-secondary)' }}>
+                                        {locale === 'ja'
+                                            ? '当初課題の解消状況や経緯を記録します。空欄の場合は未対応扱いになります。'
+                                            : 'Record how the detected issues were resolved. Left blank means unresolved.'}
+                                    </p>
+                                    <textarea
+                                        value={resolutionMemo}
+                                        onChange={e => setResolutionMemo(e.target.value)}
+                                        rows={3}
+                                        style={{ width: '100%', padding: '8px 10px', borderRadius: 8, border: '1px solid #e2e8f0', fontSize: 13, resize: 'vertical' }}
+                                        placeholder={locale === 'ja' ? '例：特約付帯の意向を確認し、改善プランで解消' : 'e.g. Confirmed intent to add rider; resolved with improved plan'}
+                                        disabled={run.run_status === 'finalized'}
+                                    />
+                                    {run.run_status !== 'finalized' && (
+                                        <button
+                                            type="button"
+                                            disabled={savingMemo}
+                                            onClick={async () => {
+                                                if (!snapshot) return
+                                                setSavingMemo(true)
+                                                const supabase = createClient()
+                                                await supabase.from('snapshot').update({ resolution_memo: resolutionMemo || null }).eq('id', snapshot.id)
+                                                setSavingMemo(false)
+                                                showToast(locale === 'ja' ? 'メモを保存しました' : 'Memo saved')
+                                            }}
+                                            style={{ fontSize: 13, padding: '6px 14px', borderRadius: 6, border: '1px solid #cbd5e1', background: 'white', cursor: 'pointer' }}
+                                        >
+                                            {savingMemo ? '...' : (locale === 'ja' ? '保存' : 'Save')}
+                                        </button>
+                                    )}
                                 </div>
 
                                 {/* Consent for compare path */}

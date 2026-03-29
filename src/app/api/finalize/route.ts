@@ -40,6 +40,17 @@ export async function POST(request: Request) {
             )
         }
 
+        // M2 Spec 5: insurer_list_presented must be recorded for all paths
+        const { data: insurerListEvent } = await supabase
+            .from('audit_event')
+            .select('id')
+            .eq('run_id', runId)
+            .eq('event_type', 'insurer_list_presented')
+            .maybeSingle()
+        if (!insurerListEvent) {
+            return Response.json({ error: 'insurer_list_presented not recorded' }, { status: 422 })
+        }
+
         // Normal path: compare_presented_at must be set
         if (!exceptionRoute && !run.compare_presented_at) {
             return Response.json({ error: 'compare_presented_at not set' }, { status: 422 })

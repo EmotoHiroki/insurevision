@@ -39,16 +39,19 @@ export interface Step1Data {
     confirmedItems: string[]
     supplementedItems: string[]
     unresolvedItems: string[]
+    conditionChangeNote: string
 }
 
 interface Step1DiagnosisProps {
     locale: Locale
+    runType: 'new_contract' | 'renewal'
     onComplete: (data: Step1Data) => void
 }
 
-export default function Step1Diagnosis({ locale, onComplete }: Step1DiagnosisProps) {
+export default function Step1Diagnosis({ locale, runType, onComplete }: Step1DiagnosisProps) {
     const [csvImported, setCsvImported] = useState(false)
     const [pdfObjectKey, setPdfObjectKey] = useState('')
+    const [conditionChangeNote, setConditionChangeNote] = useState('')
     // Per-flag review state: 'pending' | 'confirmed' | 'supplemented'
     const [flagStatus, setFlagStatus] = useState<Record<string, 'pending' | 'confirmed' | 'supplemented'>>({})
     const [error, setError] = useState('')
@@ -99,6 +102,7 @@ export default function Step1Diagnosis({ locale, onComplete }: Step1DiagnosisPro
             confirmedItems,
             supplementedItems,
             unresolvedItems,
+            conditionChangeNote,
         })
     }
 
@@ -229,6 +233,27 @@ export default function Step1Diagnosis({ locale, onComplete }: Step1DiagnosisPro
                     </div>
                 )}
             </div>
+
+            {/* M2 Spec 3: 前提条件変更メモ — renewal runs only */}
+            {runType === 'renewal' && (
+                <div className="section-card space-y-2">
+                    <label className="form-label">
+                        {locale === 'ja' ? '前提条件の変更点（任意）' : 'Condition changes (optional)'}
+                    </label>
+                    <p className="text-xs text-gray-500">
+                        {locale === 'ja'
+                            ? '年齢条件・運転者限定・使用目的など、前年から変更がある場合に記録してください。'
+                            : 'Record any changes in age condition, driver restriction, or vehicle usage from last year.'}
+                    </p>
+                    <textarea
+                        value={conditionChangeNote}
+                        onChange={(e) => setConditionChangeNote(e.target.value)}
+                        rows={3}
+                        placeholder={locale === 'ja' ? '例：年齢条件を全年齢→26歳以上に変更' : 'e.g. Age condition changed from all ages to 26+'}
+                        className="form-input resize-none"
+                    />
+                </div>
+            )}
 
             {error && <p className="form-error">{error}</p>}
 

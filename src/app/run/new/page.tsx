@@ -128,6 +128,7 @@ export default function NewRunPage() {
                 customer_decision_at: new Date().toISOString(),
                 customer_intent_memo: intentData.customerIntentMemo,
                 diagnosis_memo: diagnosisMemo,
+                condition_change_note: step1Data.conditionChangeNote || null,
                 run_status: 'draft',
                 export_status: 'pending',
             }).select().single()
@@ -508,7 +509,7 @@ export default function NewRunPage() {
                             )}
 
                             {step === 1 && (
-                                <Step1Diagnosis locale={locale} onComplete={handleStep1Complete} />
+                                <Step1Diagnosis locale={locale} runType={runType} onComplete={handleStep1Complete} />
                             )}
                             {step === 2 && step1Data && (
                                 <Step2IssueSharing
