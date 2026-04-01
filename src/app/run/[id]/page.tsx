@@ -860,9 +860,9 @@ export default function RunDetailPage() {
                                         rows={3}
                                         style={{ width: '100%', padding: '8px 10px', borderRadius: 8, border: '1px solid #e2e8f0', fontSize: 13, resize: 'vertical' }}
                                         placeholder={locale === 'ja' ? '例：特約付帯の意向を確認し、改善プランで解消' : 'e.g. Confirmed intent to add rider; resolved with improved plan'}
-                                        disabled={run.run_status === 'finalized'}
+                                        disabled={!isEditable}
                                     />
-                                    {run.run_status !== 'finalized' && (
+                                    {isEditable && (
                                         <button
                                             type="button"
                                             disabled={savingMemo}
