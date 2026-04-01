@@ -4,7 +4,7 @@ import { useEffect, useState, useCallback } from 'react'
 import { useRouter, useParams, useSearchParams } from 'next/navigation'
 import { createClient } from '@/lib/supabase/client'
 import { useLocale } from '@/lib/locale-context'
-import type { Run, Candidate, Operator, AuditEvent, Snapshot } from '@/lib/types'
+import type { Run, Candidate, Operator, AuditEvent, Snapshot, CoverageStatus } from '@/lib/types'
 import { t as i18nT } from '@/lib/i18n'
 import { format } from 'date-fns'
 import {
@@ -53,6 +53,8 @@ export default function RunDetailPage() {
     // M2 Spec 2: 課題解消メモ
     const [resolutionMemo, setResolutionMemo] = useState('')
     const [savingMemo, setSavingMemo] = useState(false)
+    // M2 Spec 1: coverage_status update
+    const [updatingCoverage, setUpdatingCoverage] = useState<string | null>(null)
 
     // ─────────────────────────────────────────────
     const showToast = (msg: string, type: 'success' | 'error' = 'success') => {
@@ -166,6 +168,39 @@ export default function RunDetailPage() {
         } catch (e: unknown) {
             showToast(e instanceof Error ? e.message : 'Error', 'error')
         } finally { setSaving(false) }
+    }
+
+    // M2 D-A: add recommended candidate (same_insurer)
+    const handleAddRecommended = async () => {
+        if (!run) return
+        const ROLES = ['recommended_1', 'recommended_2', 'recommended_3'] as const
+        const nextRole = ROLES.find(r => !candidates.some(c => c.role === r))
+        if (!nextRole) return
+        setSaving(true)
+        try {
+            const supabase = createClient()
+            const nextSlot = candidates.length > 0 ? Math.max(...candidates.map(c => c.slot_no)) + 1 : 1
+            const { data, error: err } = await supabase.from('candidate').insert({
+                run_id: runId,
+                slot_no: nextSlot,
+                insurer_name: '',
+                role: nextRole,
+                status: 'active',
+            }).select().single()
+            if (err) throw err
+            setCandidates(prev => [...prev, data as Candidate])
+        } catch (e: unknown) {
+            showToast(e instanceof Error ? e.message : 'Error', 'error')
+        } finally { setSaving(false) }
+    }
+
+    // M2 Spec 1: update coverage_status on a candidate
+    const handleUpdateCoverageStatus = async (candidateId: string, status: CoverageStatus) => {
+        setUpdatingCoverage(candidateId)
+        const supabase = createClient()
+        await supabase.from('candidate').update({ coverage_status: status }).eq('id', candidateId)
+        setCandidates(prev => prev.map(c => c.id === candidateId ? { ...c, coverage_status: status } : c))
+        setUpdatingCoverage(null)
     }
 
     // ─────────────────────────────────────────────
@@ -533,81 +568,227 @@ export default function RunDetailPage() {
                             </div>
                         )}
 
-                        {/* Candidate columns */}
-                        {candidates.length > 0 && (
-                            <div style={{
-                                display: 'grid',
-                                gridTemplateColumns: run.comparison_scope === 'same_insurer'
-                                    ? '1fr 1fr'
-                                    : `repeat(${Math.max(activeCandidates.length, 1)}, 1fr)`,
-                                gap: 16,
-                            }}>
-                                {(run.comparison_scope === 'same_insurer'
-                                    ? [candidates.find(c => c.role === 'current'), candidates.find(c => c.role === 'recommended')].filter(Boolean) as Candidate[]
-                                    : activeCandidates
-                                ).map(c => (
-                                    <div key={c.id} className="section-card" style={{
-                                        borderTop: `3px solid ${c.role === 'current' ? '#6366f1' : c.role === 'recommended' ? 'var(--success)' : 'var(--primary)'}`,
-                                        opacity: c.status === 'excluded' ? 0.5 : 1,
-                                    }}>
-                                        {c.role && (
-                                            <div style={{ fontSize: 11, fontWeight: 700, color: c.role === 'current' ? '#6366f1' : 'var(--success)', marginBottom: 8 }}>
-                                                {c.role === 'current'
-                                                    ? (locale === 'ja' ? '現在の契約' : 'Current')
-                                                    : (locale === 'ja' ? '推奨候補' : 'Recommended')}
-                                            </div>
-                                        )}
-                                        <div style={{ fontSize: 16, fontWeight: 700 }}>{c.insurer_name}</div>
-                                        {c.product_name && <div style={{ fontSize: 13, color: 'var(--text-secondary)', marginTop: 2 }}>{c.product_name}</div>}
-                                        {c.annual_premium != null && (
-                                            <div style={{ fontSize: 22, fontWeight: 700, color: 'var(--primary)', marginTop: 8 }}>
-                                                ¥{c.annual_premium.toLocaleString()}
-                                            </div>
-                                        )}
-                                        {c.excluded_reason && (
-                                            <div style={{ fontSize: 12, color: 'var(--error)', marginTop: 8, background: 'rgba(198,40,40,0.05)', padding: '6px 10px', borderRadius: 6 }}>
-                                                {c.excluded_reason}
-                                            </div>
-                                        )}
-                                        {isEditable && c.status === 'active' && !run.compare_presented_at && (
-                                            <div style={{ marginTop: 12 }}>
-                                                {excludingId === c.id ? (
-                                                    <div style={{ display: 'flex', gap: 6, flexDirection: 'column' }}>
-                                                        <input
-                                                            className="form-input"
-                                                            value={exclusionReason}
-                                                            onChange={e => setExclusionReason(e.target.value)}
-                                                            placeholder={locale === 'ja' ? '除外理由' : 'Exclusion reason'}
-                                                        />
-                                                        <div style={{ display: 'flex', gap: 6 }}>
-                                                            <button className="btn-danger" onClick={() => handleExcludeCandidate(c.id)} disabled={!exclusionReason.trim() || saving} style={{ fontSize: 12, padding: '5px 10px' }}>
-                                                                <LuCheck size={12} style={{ marginRight: 4 }} />
-                                                                {locale === 'ja' ? '確定' : 'Confirm'}
-                                                            </button>
-                                                            <button className="btn-secondary" onClick={() => { setExcludingId(null); setExclusionReason('') }} style={{ fontSize: 12, padding: '5px 10px' }}>
-                                                                {locale === 'ja' ? 'キャンセル' : 'Cancel'}
-                                                            </button>
-                                                        </div>
+                        {/* ── D-A: same_insurer 5-role layout ── */}
+                        {run.comparison_scope === 'same_insurer' && (() => {
+                            const ROLE_ORDER = ['prior', 'same_conditions', 'recommended_1', 'recommended_2', 'recommended_3'] as const
+                            const ROLE_META: Record<string, { ja: string; en: string; color: string }> = {
+                                prior:           { ja: '前年契約',   en: 'Prior Year',      color: '#6366f1' },
+                                same_conditions: { ja: '前年同条件', en: 'Same Conditions',  color: '#0277bd' },
+                                recommended_1:   { ja: 'おすすめ1', en: 'Recommended 1',    color: '#2e7d32' },
+                                recommended_2:   { ja: 'おすすめ2', en: 'Recommended 2',    color: '#2e7d32' },
+                                recommended_3:   { ja: 'おすすめ3', en: 'Recommended 3',    color: '#2e7d32' },
+                            }
+                            const orderedCandidates = ROLE_ORDER
+                                .map(r => candidates.find(c => c.role === r))
+                                .filter(Boolean) as Candidate[]
+                            const recCount = candidates.filter(c => ['recommended_1','recommended_2','recommended_3'].includes(c.role ?? '')).length
+                            if (orderedCandidates.length === 0) return (
+                                <div className="section-card" style={{ textAlign: 'center', padding: 48 }}>
+                                    <p style={{ color: 'var(--text-secondary)' }}>{i18nT(locale, 'noDataFound')}</p>
+                                </div>
+                            )
+                            return (
+                                <>
+                                    <div style={{ display: 'grid', gridTemplateColumns: `repeat(${orderedCandidates.length}, 1fr)`, gap: 16 }}>
+                                        {orderedCandidates.map(c => {
+                                            const meta = ROLE_META[c.role ?? ''] ?? { ja: c.role ?? '', en: c.role ?? '', color: 'var(--primary)' }
+                                            const isReadonly = c.role === 'prior'
+                                            const canExclude = isEditable && !isReadonly && c.status === 'active' && !run.compare_presented_at
+                                            return (
+                                                <div key={c.id} className="section-card" style={{ borderTop: `3px solid ${meta.color}`, opacity: c.status === 'excluded' ? 0.5 : 1 }}>
+                                                    <div style={{ fontSize: 11, fontWeight: 700, color: meta.color, marginBottom: 8, textTransform: 'uppercase', letterSpacing: '0.05em' }}>
+                                                        {locale === 'ja' ? meta.ja : meta.en}
+                                                        {isReadonly && <span style={{ marginLeft: 6, fontWeight: 400, opacity: 0.7 }}>({locale === 'ja' ? '読取専用' : 'readonly'})</span>}
                                                     </div>
-                                                ) : (
-                                                    <button onClick={() => { setExcludingId(c.id); setExclusionReason('') }} style={{
-                                                        fontSize: 12, padding: '5px 10px', border: '1px solid var(--error)', color: 'var(--error)',
-                                                        background: 'transparent', borderRadius: 6, cursor: 'pointer', display: 'flex', alignItems: 'center', gap: 4,
-                                                    }}>
-                                                        <LuTrash2 size={12} /> {i18nT(locale, 'excludeCandidate')}
-                                                    </button>
+                                                    <div style={{ fontSize: 15, fontWeight: 700 }}>{c.insurer_name || '—'}</div>
+                                                    {c.product_name && <div style={{ fontSize: 13, color: 'var(--text-secondary)', marginTop: 2 }}>{c.product_name}</div>}
+                                                    {c.annual_premium != null && (
+                                                        <div style={{ fontSize: 20, fontWeight: 700, color: 'var(--primary)', marginTop: 8 }}>
+                                                            ¥{c.annual_premium.toLocaleString()}
+                                                        </div>
+                                                    )}
+                                                    {c.excluded_reason && (
+                                                        <div style={{ fontSize: 12, color: 'var(--error)', marginTop: 8, background: 'rgba(198,40,40,0.05)', padding: '6px 10px', borderRadius: 6 }}>
+                                                            {c.excluded_reason}
+                                                        </div>
+                                                    )}
+                                                    {canExclude && (
+                                                        <div style={{ marginTop: 12 }}>
+                                                            {excludingId === c.id ? (
+                                                                <div style={{ display: 'flex', gap: 6, flexDirection: 'column' }}>
+                                                                    <input className="form-input" value={exclusionReason} onChange={e => setExclusionReason(e.target.value)}
+                                                                        placeholder={locale === 'ja' ? '除外理由' : 'Exclusion reason'} />
+                                                                    <div style={{ display: 'flex', gap: 6 }}>
+                                                                        <button className="btn-danger" onClick={() => handleExcludeCandidate(c.id)} disabled={!exclusionReason.trim() || saving} style={{ fontSize: 12, padding: '5px 10px' }}>
+                                                                            <LuCheck size={12} style={{ marginRight: 4 }} />{locale === 'ja' ? '確定' : 'Confirm'}
+                                                                        </button>
+                                                                        <button className="btn-secondary" onClick={() => { setExcludingId(null); setExclusionReason('') }} style={{ fontSize: 12, padding: '5px 10px' }}>
+                                                                            {locale === 'ja' ? 'キャンセル' : 'Cancel'}
+                                                                        </button>
+                                                                    </div>
+                                                                </div>
+                                                            ) : (
+                                                                <button onClick={() => { setExcludingId(c.id); setExclusionReason('') }} style={{
+                                                                    fontSize: 12, padding: '5px 10px', border: '1px solid var(--error)', color: 'var(--error)',
+                                                                    background: 'transparent', borderRadius: 6, cursor: 'pointer', display: 'flex', alignItems: 'center', gap: 4,
+                                                                }}>
+                                                                    <LuTrash2 size={12} /> {i18nT(locale, 'excludeCandidate')}
+                                                                </button>
+                                                            )}
+                                                        </div>
+                                                    )}
+                                                </div>
+                                            )
+                                        })}
+                                    </div>
+                                    {/* Add recommended button */}
+                                    {isEditable && !run.compare_presented_at && recCount < 3 && (
+                                        <button className="btn-secondary" onClick={handleAddRecommended} disabled={saving}
+                                            style={{ display: 'flex', alignItems: 'center', gap: 6, fontSize: 13 }}>
+                                            <LuPlus size={14} />
+                                            {locale === 'ja' ? 'おすすめを追加' : 'Add Recommended'}
+                                        </button>
+                                    )}
+                                </>
+                            )
+                        })()}
+
+                        {/* ── multi_insurer candidate columns ── */}
+                        {run.comparison_scope !== 'same_insurer' && (
+                            <>
+                                {activeCandidates.length === 0 && (
+                                    <div className="section-card" style={{ textAlign: 'center', padding: 48 }}>
+                                        <p style={{ color: 'var(--text-secondary)' }}>{i18nT(locale, 'noDataFound')}</p>
+                                    </div>
+                                )}
+                                {activeCandidates.length > 0 && (
+                                    <div style={{ display: 'grid', gridTemplateColumns: `repeat(${activeCandidates.length}, 1fr)`, gap: 16 }}>
+                                        {activeCandidates.map(c => (
+                                            <div key={c.id} className="section-card" style={{
+                                                borderTop: `3px solid ${c.role === 'current' ? '#6366f1' : c.role === 'recommended' ? 'var(--success)' : 'var(--primary)'}`,
+                                                opacity: c.status === 'excluded' ? 0.5 : 1,
+                                            }}>
+                                                {c.role && (
+                                                    <div style={{ fontSize: 11, fontWeight: 700, color: c.role === 'current' ? '#6366f1' : 'var(--success)', marginBottom: 8 }}>
+                                                        {c.role === 'current' ? (locale === 'ja' ? '現在の契約' : 'Current') : (locale === 'ja' ? '推奨候補' : 'Recommended')}
+                                                    </div>
+                                                )}
+                                                <div style={{ fontSize: 16, fontWeight: 700 }}>{c.insurer_name}</div>
+                                                {c.product_name && <div style={{ fontSize: 13, color: 'var(--text-secondary)', marginTop: 2 }}>{c.product_name}</div>}
+                                                {c.annual_premium != null && (
+                                                    <div style={{ fontSize: 22, fontWeight: 700, color: 'var(--primary)', marginTop: 8 }}>
+                                                        ¥{c.annual_premium.toLocaleString()}
+                                                    </div>
+                                                )}
+
+                                                {/* M2 Spec 1: coverage_status 3-state toggle */}
+                                                <div style={{ marginTop: 12 }}>
+                                                    <div style={{ fontSize: 11, color: 'var(--text-secondary)', marginBottom: 6 }}>
+                                                        {locale === 'ja' ? '付帯状況' : 'Coverage Status'}
+                                                    </div>
+                                                    <div style={{ display: 'flex', gap: 4 }}>
+                                                        {([
+                                                            { value: 'full'    as CoverageStatus, ja: 'あり',   en: 'Full',    bg: '#dcfce7', color: '#166534', active: '#16a34a' },
+                                                            { value: 'partial' as CoverageStatus, ja: '一部',   en: 'Partial', bg: '#fff7ed', color: '#9a3412', active: '#ea580c' },
+                                                            { value: 'none'    as CoverageStatus, ja: 'なし',   en: 'None',    bg: '#f1f5f9', color: '#475569', active: '#64748b' },
+                                                        ]).map(opt => {
+                                                            const isActive = c.coverage_status === opt.value
+                                                            return (
+                                                                <button key={opt.value}
+                                                                    disabled={!isEditable || updatingCoverage === c.id}
+                                                                    onClick={() => handleUpdateCoverageStatus(c.id, opt.value)}
+                                                                    style={{
+                                                                        flex: 1, padding: '4px 0', fontSize: 11, fontWeight: isActive ? 700 : 400,
+                                                                        border: `1px solid ${isActive ? opt.active : '#e2e8f0'}`,
+                                                                        borderRadius: 6, cursor: isEditable ? 'pointer' : 'default',
+                                                                        background: isActive ? opt.bg : 'white',
+                                                                        color: isActive ? opt.color : 'var(--text-secondary)',
+                                                                    }}
+                                                                >
+                                                                    {locale === 'ja' ? opt.ja : opt.en}
+                                                                </button>
+                                                            )
+                                                        })}
+                                                    </div>
+                                                </div>
+
+                                                {/* M2 Spec 4: vehicle_premises table */}
+                                                {c.vehicle_premises && c.vehicle_premises.length > 0 && (
+                                                    <div style={{ marginTop: 12 }}>
+                                                        <div style={{ fontSize: 11, color: 'var(--text-secondary)', marginBottom: 6 }}>
+                                                            {locale === 'ja' ? '車両別前提条件' : 'Per-Vehicle Conditions'}
+                                                        </div>
+                                                        <table style={{ width: '100%', fontSize: 11, borderCollapse: 'collapse' }}>
+                                                            <thead>
+                                                                <tr style={{ background: '#f8fafc' }}>
+                                                                    <th style={{ padding: '4px 6px', textAlign: 'left', borderBottom: '1px solid #e2e8f0', fontWeight: 600 }}>
+                                                                        {locale === 'ja' ? '車両' : 'Veh.'}
+                                                                    </th>
+                                                                    <th style={{ padding: '4px 6px', textAlign: 'left', borderBottom: '1px solid #e2e8f0', fontWeight: 600 }}>
+                                                                        {locale === 'ja' ? '等級' : 'Grade'}
+                                                                    </th>
+                                                                    {run.customer_type === 'individual' && <>
+                                                                        <th style={{ padding: '4px 6px', textAlign: 'left', borderBottom: '1px solid #e2e8f0', fontWeight: 600 }}>
+                                                                            {locale === 'ja' ? '年齢条件' : 'Age Cond.'}
+                                                                        </th>
+                                                                        <th style={{ padding: '4px 6px', textAlign: 'left', borderBottom: '1px solid #e2e8f0', fontWeight: 600 }}>
+                                                                            {locale === 'ja' ? '運転者限定' : 'Driver Limit'}
+                                                                        </th>
+                                                                    </>}
+                                                                </tr>
+                                                            </thead>
+                                                            <tbody>
+                                                                {c.vehicle_premises.map((vp, i) => (
+                                                                    <tr key={i} style={{ borderBottom: '1px solid #f1f5f9' }}>
+                                                                        <td style={{ padding: '4px 6px' }}>{String(vp.vehicle_no ?? i + 1)}</td>
+                                                                        <td style={{ padding: '4px 6px' }}>{String(vp.grade ?? '—')}</td>
+                                                                        {run.customer_type === 'individual' && <>
+                                                                            <td style={{ padding: '4px 6px' }}>{String(vp.age_condition ?? '—')}</td>
+                                                                            <td style={{ padding: '4px 6px' }}>{String(vp.driver_limit ?? '—')}</td>
+                                                                        </>}
+                                                                    </tr>
+                                                                ))}
+                                                            </tbody>
+                                                        </table>
+                                                    </div>
+                                                )}
+
+                                                {c.excluded_reason && (
+                                                    <div style={{ fontSize: 12, color: 'var(--error)', marginTop: 8, background: 'rgba(198,40,40,0.05)', padding: '6px 10px', borderRadius: 6 }}>
+                                                        {c.excluded_reason}
+                                                    </div>
+                                                )}
+                                                {isEditable && c.status === 'active' && !run.compare_presented_at && (
+                                                    <div style={{ marginTop: 12 }}>
+                                                        {excludingId === c.id ? (
+                                                            <div style={{ display: 'flex', gap: 6, flexDirection: 'column' }}>
+                                                                <input className="form-input" value={exclusionReason} onChange={e => setExclusionReason(e.target.value)}
+                                                                    placeholder={locale === 'ja' ? '除外理由' : 'Exclusion reason'} />
+                                                                <div style={{ display: 'flex', gap: 6 }}>
+                                                                    <button className="btn-danger" onClick={() => handleExcludeCandidate(c.id)} disabled={!exclusionReason.trim() || saving} style={{ fontSize: 12, padding: '5px 10px' }}>
+                                                                        <LuCheck size={12} style={{ marginRight: 4 }} />
+                                                                        {locale === 'ja' ? '確定' : 'Confirm'}
+                                                                    </button>
+                                                                    <button className="btn-secondary" onClick={() => { setExcludingId(null); setExclusionReason('') }} style={{ fontSize: 12, padding: '5px 10px' }}>
+                                                                        {locale === 'ja' ? 'キャンセル' : 'Cancel'}
+                                                                    </button>
+                                                                </div>
+                                                            </div>
+                                                        ) : (
+                                                            <button onClick={() => { setExcludingId(c.id); setExclusionReason('') }} style={{
+                                                                fontSize: 12, padding: '5px 10px', border: '1px solid var(--error)', color: 'var(--error)',
+                                                                background: 'transparent', borderRadius: 6, cursor: 'pointer', display: 'flex', alignItems: 'center', gap: 4,
+                                                            }}>
+                                                                <LuTrash2 size={12} /> {i18nT(locale, 'excludeCandidate')}
+                                                            </button>
+                                                        )}
+                                                    </div>
                                                 )}
                                             </div>
-                                        )}
+                                        ))}
                                     </div>
-                                ))}
-                            </div>
-                        )}
-
-                        {candidates.length === 0 && (
-                            <div className="section-card" style={{ textAlign: 'center', padding: 48 }}>
-                                <p style={{ color: 'var(--text-secondary)' }}>{i18nT(locale, 'noDataFound')}</p>
-                            </div>
+                                )}
+                            </>
                         )}
                     </div>
                 )}
