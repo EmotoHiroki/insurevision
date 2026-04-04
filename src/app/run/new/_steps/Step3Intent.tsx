@@ -14,7 +14,8 @@ interface ConsentState {
 export interface Step3Data {
     customerDecision: CustomerDecision
     customerIntentMemo: string
-    consentState: ConsentState   // used only for comparison_waived path
+    intentConfirmedWith: string   // G-1: 意向確認相手
+    consentState: ConsentState    // used only for comparison_waived path
 }
 
 interface Step3IntentProps {
@@ -63,6 +64,7 @@ const DECISION_OPTIONS: Array<{
 export default function Step3Intent({ locale, runType, onComplete }: Step3IntentProps) {
     const [customerDecision, setCustomerDecision] = useState<CustomerDecision | ''>('')
     const [customerIntentMemo, setCustomerIntentMemo] = useState('')
+    const [intentConfirmedWith, setIntentConfirmedWith] = useState('')
     const [consent, setConsent] = useState<ConsentState>({ importantMatters: false, personalInfo: false })
     const [error, setError] = useState('')
 
@@ -94,6 +96,7 @@ export default function Step3Intent({ locale, runType, onComplete }: Step3Intent
         onComplete({
             customerDecision: customerDecision as CustomerDecision,
             customerIntentMemo: customerIntentMemo.trim(),
+            intentConfirmedWith: intentConfirmedWith.trim(),
             consentState: consent,
         })
     }
@@ -212,6 +215,20 @@ export default function Step3Intent({ locale, runType, onComplete }: Step3Intent
                     </label>
                 </div>
             )}
+
+            {/* G-1: 意向確認相手 */}
+            <div>
+                <label className="form-label">
+                    {locale === 'ja' ? '意向確認相手' : 'Intent Confirmed With'}
+                </label>
+                <input
+                    type="text"
+                    value={intentConfirmedWith}
+                    onChange={e => setIntentConfirmedWith(e.target.value)}
+                    placeholder={locale === 'ja' ? '例：本人、配偶者、法人担当者' : 'e.g. Customer, Spouse, Corporate rep'}
+                    className="form-input"
+                />
+            </div>
 
             {/* Intent memo */}
             <div>

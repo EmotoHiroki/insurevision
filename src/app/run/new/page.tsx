@@ -33,6 +33,8 @@ export default function NewRunPage() {
     // ── Customer basics (collected before Step 1) ──
     const [customerType, setCustomerType] = useState<CustomerType>('individual')
     const [customerRef, setCustomerRef] = useState('')
+    const [customerName, setCustomerName] = useState('')           // G-2
+    const [corporateDecisionMaker, setCorporateDecisionMaker] = useState('')  // G-3
     const [runType, setRunType] = useState<RunType>('new_contract')
     const [isTest, setIsTest] = useState(false)
     const [basicsError, setBasicsError] = useState('')
@@ -121,12 +123,15 @@ export default function NewRunPage() {
                 product_line: 'auto',   // Phase 2: make configurable
                 customer_type: customerType,
                 customer_ref: customerRef.trim(),
+                customer_name: customerName.trim() || null,
+                corporate_decision_maker: customerType === 'corporate' ? (corporateDecisionMaker.trim() || null) : null,
                 run_type: runType,
                 is_test: isTest,
                 core_logic_version: '1.0.0',
                 customer_decision: intentData.customerDecision,
                 customer_decision_at: new Date().toISOString(),
                 customer_intent_memo: intentData.customerIntentMemo,
+                intent_confirmed_with: intentData.intentConfirmedWith || null,
                 diagnosis_memo: diagnosisMemo,
                 condition_change_note: step1Data.conditionChangeNote || null,
                 run_status: 'draft',
@@ -429,6 +434,36 @@ export default function NewRunPage() {
                                     className="form-input"
                                 />
                             </div>
+
+                            {/* G-2: 顧客名 */}
+                            <div>
+                                <label className="form-label">
+                                    {locale === 'ja' ? '顧客名' : 'Customer Name'}
+                                </label>
+                                <input
+                                    type="text"
+                                    value={customerName}
+                                    onChange={e => setCustomerName(e.target.value)}
+                                    placeholder={locale === 'ja' ? '例: 山田 太郎' : 'e.g. Taro Yamada'}
+                                    className="form-input"
+                                />
+                            </div>
+
+                            {/* G-3: 法人意思決定者（法人のみ） */}
+                            {customerType === 'corporate' && (
+                                <div>
+                                    <label className="form-label">
+                                        {locale === 'ja' ? '法人意思決定者' : 'Corporate Decision Maker'}
+                                    </label>
+                                    <input
+                                        type="text"
+                                        value={corporateDecisionMaker}
+                                        onChange={e => setCorporateDecisionMaker(e.target.value)}
+                                        placeholder={locale === 'ja' ? '例: 代表取締役 田中一郎' : 'e.g. CEO Ichiro Tanaka'}
+                                        className="form-input"
+                                    />
+                                </div>
+                            )}
 
                             {/* Run type */}
                             <div>

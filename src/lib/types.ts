@@ -2,7 +2,8 @@
 // Database Types — M2 v1.0
 // =============================================
 
-export type RunStatus = 'draft' | 'finalized' | 'archived'
+export type RunStatus = 'draft' | 'finalized' | 'archived' | 'suspended'
+export type SuspensionType = 'condition_adjustment' | 'mid_session'
 export type CustomerType = 'individual' | 'corporate'
 export type RunType = 'new_contract' | 'renewal'
 export type CandidateStatus = 'active' | 'excluded'
@@ -82,6 +83,12 @@ export interface Run {
     // Step 5: Priority
     priority_factors: string[] | null
     priority_weight: Record<string, number> | null  // keys must be subset of priority_factors
+    // G-2: 顧客名
+    customer_name: string | null
+    // G-1: 意向確認相手
+    intent_confirmed_with: string | null
+    // G-3: 法人意思決定者（corporate のみ）
+    corporate_decision_maker: string | null
     // M2: Step 1 — 前提条件変更メモ（renewal時のみ）
     condition_change_note: string | null
     // Comparison screen
@@ -95,6 +102,10 @@ export interface Run {
     pdf_object_key: string | null
     pdf_sha256: string | null
     export_status: ExportStatus | null
+    // Suspension
+    pending_note: string | null
+    suspended_at: string | null
+    suspension_type: SuspensionType | null
     // Meta
     core_logic_version: string
     is_test: boolean

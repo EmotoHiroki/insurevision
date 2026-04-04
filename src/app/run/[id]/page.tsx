@@ -1,6 +1,6 @@
 'use client'
 
-import { useEffect, useState, useCallback } from 'react'
+import React, { useEffect, useState, useCallback } from 'react'
 import { useRouter, useParams, useSearchParams } from 'next/navigation'
 import { createClient } from '@/lib/supabase/client'
 import { useLocale } from '@/lib/locale-context'
@@ -17,6 +17,57 @@ import {
 // Types
 // ─────────────────────────────────────────────
 type TabKey = 'overview' | 'comparison' | 'finalize' | 'audit'
+
+// ─────────────────────────────────────────────
+// D-C: RedundancyRow sub-component
+// ─────────────────────────────────────────────
+function RedundancyRow({ item, isEditable, locale, saving, onSave, onRemove }: {
+    item: { item_key: string; decision: 'keep' | 'remove'; reason: string }
+    isEditable: boolean
+    locale: string
+    saving: boolean
+    onSave: (key: string, decision: 'keep' | 'remove', reason: string) => void
+    onRemove: (key: string) => void
+}) {
+    const [decision, setDecision] = React.useState<'keep' | 'remove'>(item.decision)
+    const [reason, setReason] = React.useState(item.reason)
+
+    return (
+        <div style={{ border: '1px solid #e2e8f0', borderRadius: 8, padding: '12px 14px', marginBottom: 10 }}>
+            <div style={{ fontWeight: 600, fontSize: 13, marginBottom: 8 }}>{item.item_key}</div>
+            <div style={{ display: 'flex', gap: 8, marginBottom: 8 }}>
+                {(['keep', 'remove'] as const).map(opt => (
+                    <button key={opt} disabled={!isEditable}
+                        onClick={() => setDecision(opt)}
+                        style={{
+                            padding: '4px 12px', fontSize: 12, borderRadius: 6, cursor: isEditable ? 'pointer' : 'default',
+                            border: `1px solid ${decision === opt ? (opt === 'keep' ? '#16a34a' : '#dc2626') : '#e2e8f0'}`,
+                            background: decision === opt ? (opt === 'keep' ? '#dcfce7' : '#fee2e2') : 'white',
+                            color: decision === opt ? (opt === 'keep' ? '#15803d' : '#dc2626') : 'var(--text-secondary)',
+                            fontWeight: decision === opt ? 700 : 400,
+                        }}>
+                        {opt === 'keep' ? (locale === 'ja' ? '継続する' : 'Keep') : (locale === 'ja' ? '削除して見直す' : 'Remove')}
+                    </button>
+                ))}
+            </div>
+            <input value={reason} onChange={e => setReason(e.target.value)} disabled={!isEditable}
+                placeholder={locale === 'ja' ? '理由を入力' : 'Enter reason'}
+                style={{ width: '100%', padding: '6px 10px', borderRadius: 6, border: '1px solid #e2e8f0', fontSize: 12, marginBottom: 8 }} />
+            {isEditable && (
+                <div style={{ display: 'flex', gap: 6 }}>
+                    <button disabled={saving} onClick={() => onSave(item.item_key, decision, reason)}
+                        style={{ fontSize: 12, padding: '4px 10px', borderRadius: 6, border: '1px solid #cbd5e1', background: 'white', cursor: 'pointer' }}>
+                        {locale === 'ja' ? '保存' : 'Save'}
+                    </button>
+                    <button onClick={() => onRemove(item.item_key)}
+                        style={{ fontSize: 12, padding: '4px 10px', borderRadius: 6, border: '1px solid var(--error)', color: 'var(--error)', background: 'white', cursor: 'pointer' }}>
+                        {locale === 'ja' ? '削除' : 'Delete'}
+                    </button>
+                </div>
+            )}
+        </div>
+    )
+}
 
 export default function RunDetailPage() {
     const router = useRouter()
@@ -55,6 +106,19 @@ export default function RunDetailPage() {
     const [savingMemo, setSavingMemo] = useState(false)
     // M2 Spec 1: coverage_status update
     const [updatingCoverage, setUpdatingCoverage] = useState<string | null>(null)
+    // D-B: delivery record
+    const [deliveryMethod, setDeliveryMethod] = useState<string>('')
+    const [deliveryConfirmed, setDeliveryConfirmed] = useState(false)
+    const [savingDelivery, setSavingDelivery] = useState(false)
+    // D-C: redundancy decisions
+    const [redundancyDecisions, setRedundancyDecisions] = useState<Array<{ item_key: string; decision: 'keep' | 'remove'; reason: string }>>([])
+    const [newRedundancyItem, setNewRedundancyItem] = useState('')
+    const [savingRedundancy, setSavingRedundancy] = useState(false)
+    // Suspension
+    const [showSuspendForm, setShowSuspendForm] = useState(false)
+    const [suspensionType, setSuspensionType] = useState<'condition_adjustment' | 'mid_session'>('condition_adjustment')
+    const [pendingNote, setPendingNote] = useState('')
+    const [suspending, setSuspending] = useState(false)
 
     // ─────────────────────────────────────────────
     const showToast = (msg: string, type: 'success' | 'error' = 'success') => {
@@ -78,6 +142,11 @@ export default function RunDetailPage() {
         if (snapData) {
             setSnapshot(snapData as Snapshot)
             setResolutionMemo((snapData as Snapshot).resolution_memo ?? '')
+            setRedundancyDecisions((snapData as Snapshot).redundancy_decisions ?? [])
+        }
+        if (runData) {
+            setDeliveryMethod((runData as Run).delivery_method ?? '')
+            setDeliveryConfirmed(!!(runData as Run).delivery_confirmed_at)
         }
 
         const { data: candData } = await supabase.from('candidate').select('*').eq('run_id', runId).order('slot_no')
@@ -203,6 +272,87 @@ export default function RunDetailPage() {
         setUpdatingCoverage(null)
     }
 
+    // D-B: save delivery record
+    const handleSaveDelivery = async () => {
+        if (!operator) return
+        setSavingDelivery(true)
+        const supabase = createClient()
+        const now = new Date().toISOString()
+        await supabase.from('run').update({
+            delivery_method: deliveryMethod || null,
+            delivery_confirmed_at: deliveryConfirmed ? now : null,
+        }).eq('id', runId)
+        if (deliveryConfirmed) {
+            await supabase.from('audit_event').insert({
+                run_id: runId,
+                event_type: 'delivery_recorded' as const,
+                operator_id: operator.id,
+                payload: { delivery_method: deliveryMethod, confirmed_at: now },
+            })
+        }
+        setSavingDelivery(false)
+        showToast(locale === 'ja' ? '交付記録を保存しました' : 'Delivery record saved')
+        await loadData()
+    }
+
+    // D-C: save redundancy decision
+    const handleSaveRedundancyDecision = async (
+        itemKey: string, decision: 'keep' | 'remove', reason: string
+    ) => {
+        if (!operator || !snapshot) return
+        setSavingRedundancy(true)
+        const updated = redundancyDecisions.filter(d => d.item_key !== itemKey)
+        updated.push({ item_key: itemKey, decision, reason })
+        const supabase = createClient()
+        await supabase.from('snapshot').update({ redundancy_decisions: updated }).eq('id', snapshot.id)
+        await supabase.from('audit_event').insert({
+            run_id: runId,
+            event_type: 'redundancy_resolution_recorded' as const,
+            operator_id: operator.id,
+            payload: { item_key: itemKey, decision, reason },
+        })
+        setRedundancyDecisions(updated)
+        setSavingRedundancy(false)
+        showToast(locale === 'ja' ? '判断を保存しました' : 'Decision saved')
+    }
+
+    const handleRemoveRedundancyItem = async (itemKey: string) => {
+        if (!snapshot) return
+        const updated = redundancyDecisions.filter(d => d.item_key !== itemKey)
+        const supabase = createClient()
+        await supabase.from('snapshot').update({ redundancy_decisions: updated }).eq('id', snapshot.id)
+        setRedundancyDecisions(updated)
+    }
+
+    // Suspension
+    const handleSuspend = async () => {
+        if (!operator) return
+        setSuspending(true)
+        const supabase = createClient()
+        await supabase.from('run').update({
+            run_status: 'suspended',
+            suspension_type: suspensionType,
+            pending_note: pendingNote.trim() || null,
+            suspended_at: new Date().toISOString(),
+        }).eq('id', runId)
+        setSuspending(false)
+        setShowSuspendForm(false)
+        showToast(locale === 'ja' ? '案件を保留にしました' : 'Run suspended')
+        await loadData()
+    }
+
+    const handleResume = async () => {
+        const supabase = createClient()
+        await supabase.from('run').update({
+            run_status: 'draft',
+            suspension_type: null,
+            pending_note: null,
+            suspended_at: null,
+        }).eq('id', runId)
+        showToast(locale === 'ja' ? '案件を再開しました' : 'Run resumed')
+        await loadData()
+    }
+
     // ─────────────────────────────────────────────
     // Finalize
     // ─────────────────────────────────────────────
@@ -281,6 +431,7 @@ export default function RunDetailPage() {
             draft: { ja: '下書き', en: 'Draft' },
             finalized: { ja: '確定済み', en: 'Finalized' },
             archived: { ja: 'アーカイブ', en: 'Archived' },
+            suspended: { ja: '保留中', en: 'Suspended' },
         }
         return locale === 'ja' ? (map[s]?.ja ?? s) : (map[s]?.en ?? s)
     }
@@ -391,8 +542,13 @@ export default function RunDetailPage() {
                             </h3>
                             <dl style={{ display: 'grid', gap: 10 }}>
                                 <div><dt className="form-label">{i18nT(locale, 'customerRef')}</dt><dd style={{ fontWeight: 600 }}>{run.customer_ref}</dd></div>
+                                {run.customer_name && <div><dt className="form-label">{locale === 'ja' ? '顧客名' : 'Customer Name'}</dt><dd style={{ fontWeight: 600 }}>{run.customer_name}</dd></div>}
                                 <div><dt className="form-label">{i18nT(locale, 'customerType')}</dt><dd>{run.customer_type === 'individual' ? i18nT(locale, 'individual') : i18nT(locale, 'corporate')}</dd></div>
+                                {run.customer_type === 'corporate' && run.corporate_decision_maker && (
+                                    <div><dt className="form-label">{locale === 'ja' ? '法人意思決定者' : 'Decision Maker'}</dt><dd>{run.corporate_decision_maker}</dd></div>
+                                )}
                                 <div><dt className="form-label">{i18nT(locale, 'runType')}</dt><dd>{run.run_type === 'new_contract' ? i18nT(locale, 'newContract') : i18nT(locale, 'renewal')}</dd></div>
+                                {run.intent_confirmed_with && <div><dt className="form-label">{locale === 'ja' ? '意向確認相手' : 'Intent Confirmed With'}</dt><dd>{run.intent_confirmed_with}</dd></div>}
                                 <div><dt className="form-label">{i18nT(locale, 'createdAt')}</dt><dd style={{ fontSize: 13 }}>{format(new Date(run.created_at), 'yyyy/MM/dd HH:mm')}</dd></div>
                             </dl>
                         </div>
@@ -472,6 +628,73 @@ export default function RunDetailPage() {
                                         <div style={{ fontWeight: 700, fontSize: 18 }}>{snapshot.unresolved_items.length}</div>
                                     </div>
                                 </div>
+                            </div>
+                        )}
+
+                        {/* Suspension banner */}
+                        {run.run_status === 'suspended' && (
+                            <div className="section-card" style={{ gridColumn: '1 / -1', background: '#fffbeb', borderColor: '#fbbf24' }}>
+                                <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
+                                    <div>
+                                        <p style={{ fontWeight: 700, color: '#92400e', marginBottom: 4 }}>
+                                            {locale === 'ja' ? '保留中' : 'Suspended'} —
+                                            {run.suspension_type === 'condition_adjustment'
+                                                ? (locale === 'ja' ? ' 条件調整保留' : ' Condition Adjustment')
+                                                : (locale === 'ja' ? ' 中途保留' : ' Mid-Session')}
+                                        </p>
+                                        {run.pending_note && <p style={{ fontSize: 13, color: '#92400e' }}>{run.pending_note}</p>}
+                                        {run.suspended_at && <p style={{ fontSize: 12, color: '#b45309' }}>{new Date(run.suspended_at).toLocaleString()}</p>}
+                                    </div>
+                                    <button className="btn-primary" onClick={handleResume} style={{ fontSize: 13 }}>
+                                        {locale === 'ja' ? '保留を解除して再開' : 'Resume'}
+                                    </button>
+                                </div>
+                            </div>
+                        )}
+
+                        {/* Suspend button */}
+                        {isEditable && (
+                            <div style={{ gridColumn: '1 / -1' }}>
+                                {!showSuspendForm ? (
+                                    <button className="btn-secondary" onClick={() => setShowSuspendForm(true)} style={{ fontSize: 13 }}>
+                                        {locale === 'ja' ? '案件を保留にする' : 'Suspend Run'}
+                                    </button>
+                                ) : (
+                                    <div className="section-card" style={{ borderColor: '#fbbf24', background: '#fffbeb' }}>
+                                        <p style={{ fontWeight: 600, marginBottom: 12, color: '#92400e' }}>
+                                            {locale === 'ja' ? '保留の種別を選択してください' : 'Select suspension type'}
+                                        </p>
+                                        <div style={{ display: 'flex', gap: 12, marginBottom: 12 }}>
+                                            {([
+                                                { value: 'condition_adjustment' as const, ja: '条件調整保留', en: 'Condition Adjustment', desc: locale === 'ja' ? 'チェック完了後に条件を再確認' : 'Full checklist done, reviewing conditions' },
+                                                { value: 'mid_session' as const, ja: '中途保留', en: 'Mid-Session', desc: locale === 'ja' ? '面談途中で中断' : 'Stopped partway through meeting' },
+                                            ]).map(opt => (
+                                                <label key={opt.value} style={{
+                                                    flex: 1, padding: '10px 14px', border: `2px solid ${suspensionType === opt.value ? '#f59e0b' : '#e2e8f0'}`,
+                                                    borderRadius: 8, cursor: 'pointer', background: suspensionType === opt.value ? '#fef3c7' : 'white',
+                                                }}>
+                                                    <input type="radio" name="suspensionType" value={opt.value}
+                                                        checked={suspensionType === opt.value}
+                                                        onChange={() => setSuspensionType(opt.value)}
+                                                        style={{ marginRight: 8 }} />
+                                                    <span style={{ fontWeight: 600, fontSize: 13 }}>{locale === 'ja' ? opt.ja : opt.en}</span>
+                                                    <p style={{ fontSize: 11, color: '#78716c', marginTop: 4 }}>{opt.desc}</p>
+                                                </label>
+                                            ))}
+                                        </div>
+                                        <textarea value={pendingNote} onChange={e => setPendingNote(e.target.value)}
+                                            rows={2} placeholder={locale === 'ja' ? '保留メモ（任意）' : 'Suspension note (optional)'}
+                                            style={{ width: '100%', padding: '8px 10px', borderRadius: 8, border: '1px solid #e2e8f0', fontSize: 13, resize: 'none', marginBottom: 10 }} />
+                                        <div style={{ display: 'flex', gap: 8 }}>
+                                            <button className="btn-primary" onClick={handleSuspend} disabled={suspending} style={{ fontSize: 13, background: '#f59e0b', borderColor: '#f59e0b' }}>
+                                                {suspending ? '...' : (locale === 'ja' ? '保留にする' : 'Suspend')}
+                                            </button>
+                                            <button className="btn-secondary" onClick={() => setShowSuspendForm(false)} style={{ fontSize: 13 }}>
+                                                {locale === 'ja' ? 'キャンセル' : 'Cancel'}
+                                            </button>
+                                        </div>
+                                    </div>
+                                )}
                             </div>
                         )}
 
@@ -790,6 +1013,43 @@ export default function RunDetailPage() {
                                 )}
                             </>
                         )}
+
+                        {/* D-C: 重複補償判定 */}
+                        {snapshot && (
+                            <div className="section-card">
+                                <h3 style={{ fontSize: 15, fontWeight: 700, marginBottom: 12 }}>
+                                    {locale === 'ja' ? '重複補償の確認' : 'Redundancy Check'}
+                                </h3>
+                                {redundancyDecisions.length === 0 && (
+                                    <p style={{ fontSize: 13, color: 'var(--text-secondary)', marginBottom: 12 }}>
+                                        {locale === 'ja' ? '重複補償項目はありません。項目を追加して判断を記録できます。' : 'No redundancy items. Add items to record decisions.'}
+                                    </p>
+                                )}
+                                {redundancyDecisions.map((d) => (
+                                    <RedundancyRow key={d.item_key} item={d} isEditable={isEditable}
+                                        locale={locale} saving={savingRedundancy}
+                                        onSave={handleSaveRedundancyDecision}
+                                        onRemove={handleRemoveRedundancyItem} />
+                                ))}
+                                {isEditable && (
+                                    <div style={{ display: 'flex', gap: 8, marginTop: 12 }}>
+                                        <input className="form-input" value={newRedundancyItem}
+                                            onChange={e => setNewRedundancyItem(e.target.value)}
+                                            placeholder={locale === 'ja' ? '項目名（例：人身傷害×傷害保険）' : 'Item name (e.g. Personal injury overlap)'}
+                                            style={{ flex: 1 }} />
+                                        <button className="btn-secondary" style={{ fontSize: 13 }}
+                                            disabled={!newRedundancyItem.trim() || savingRedundancy}
+                                            onClick={() => {
+                                                if (!newRedundancyItem.trim()) return
+                                                handleSaveRedundancyDecision(newRedundancyItem.trim(), 'keep', '')
+                                                setNewRedundancyItem('')
+                                            }}>
+                                            {locale === 'ja' ? '追加' : 'Add'}
+                                        </button>
+                                    </div>
+                                )}
+                            </div>
+                        )}
                     </div>
                 )}
 
@@ -877,6 +1137,46 @@ export default function RunDetailPage() {
                                             style={{ fontSize: 13, padding: '6px 14px', borderRadius: 6, border: '1px solid #cbd5e1', background: 'white', cursor: 'pointer' }}
                                         >
                                             {savingMemo ? '...' : (locale === 'ja' ? '保存' : 'Save')}
+                                        </button>
+                                    )}
+                                </div>
+
+                                {/* D-B: 交付記録 */}
+                                <div className="section-card space-y-3">
+                                    <label style={{ fontSize: 14, fontWeight: 600, display: 'block' }}>
+                                        {locale === 'ja' ? '交付記録' : 'Delivery Record'}
+                                    </label>
+                                    <div>
+                                        <label className="form-label">{locale === 'ja' ? '交付方法' : 'Delivery Method'}</label>
+                                        <select value={deliveryMethod} onChange={e => setDeliveryMethod(e.target.value)}
+                                            disabled={!isEditable}
+                                            style={{ width: '100%', padding: '8px 10px', borderRadius: 8, border: '1px solid #e2e8f0', fontSize: 13 }}>
+                                            <option value="">{locale === 'ja' ? '選択してください' : 'Select'}</option>
+                                            <option value="hand">{locale === 'ja' ? '対面交付' : 'In-person'}</option>
+                                            <option value="mail">{locale === 'ja' ? '郵送' : 'Mail'}</option>
+                                            <option value="email">{locale === 'ja' ? 'メール' : 'Email'}</option>
+                                            <option value="digital">{locale === 'ja' ? 'デジタル交付' : 'Digital'}</option>
+                                        </select>
+                                    </div>
+                                    <label style={{ display: 'flex', alignItems: 'center', gap: 10, cursor: isEditable ? 'pointer' : 'default' }}>
+                                        <input type="checkbox" checked={deliveryConfirmed}
+                                            onChange={e => setDeliveryConfirmed(e.target.checked)}
+                                            disabled={!isEditable}
+                                            style={{ width: 16, height: 16 }} />
+                                        <span style={{ fontSize: 13 }}>
+                                            {locale === 'ja' ? '交付確認済み（お客様に書類を交付しました）' : 'Delivery confirmed (documents handed to customer)'}
+                                        </span>
+                                    </label>
+                                    {run.delivery_confirmed_at && (
+                                        <p style={{ fontSize: 12, color: 'var(--text-secondary)' }}>
+                                            {locale === 'ja' ? '交付確認日時: ' : 'Confirmed at: '}
+                                            {format(new Date(run.delivery_confirmed_at), 'yyyy/MM/dd HH:mm')}
+                                        </p>
+                                    )}
+                                    {isEditable && (
+                                        <button type="button" disabled={savingDelivery} onClick={handleSaveDelivery}
+                                            style={{ fontSize: 13, padding: '6px 14px', borderRadius: 6, border: '1px solid #cbd5e1', background: 'white', cursor: 'pointer' }}>
+                                            {savingDelivery ? '...' : (locale === 'ja' ? '保存' : 'Save')}
                                         </button>
                                     )}
                                 </div>
