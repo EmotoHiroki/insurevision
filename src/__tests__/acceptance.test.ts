@@ -689,10 +689,10 @@ describe('Flag guide messages — sanity checks', () => {
 describe('i18n — dictionary completeness', () => {
     it('3 run_status labels defined in both locales', () => {
         expect(t('ja', 'draft')).toBe('作成中')
-        expect(t('ja', 'finalized')).toBe('確定済')
+        expect(t('ja', 'finalized')).toBe('確定済（編集不可）')
         expect(t('ja', 'archived')).toBe('アーカイブ')
         expect(t('en', 'draft')).toBe('Draft')
-        expect(t('en', 'finalized')).toBe('Finalized')
+        expect(t('en', 'finalized')).toBe('Confirmed (Read-only)')
         expect(t('en', 'archived')).toBe('Archived')
     })
 

@@ -20,7 +20,7 @@ const dict = {
         // ── Run status (3 values per M1 v4.1) ─────
         status: 'ステータス',
         draft: '作成中',
-        finalized: '確定済',
+        finalized: '確定済（編集不可）',
         archived: 'アーカイブ',
 
         // ── Customer / run basics ─────────────────
@@ -201,7 +201,7 @@ const dict = {
         // ── Run status ────────────────────────────
         status: 'Status',
         draft: 'Draft',
-        finalized: 'Finalized',
+        finalized: 'Confirmed (Read-only)',
         archived: 'Archived',
 
         // ── Customer / run basics ─────────────────

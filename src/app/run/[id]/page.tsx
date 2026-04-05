@@ -429,7 +429,7 @@ export default function RunDetailPage() {
     const statusLabel = (s: string) => {
         const map: Record<string, { ja: string; en: string }> = {
             draft: { ja: '下書き', en: 'Draft' },
-            finalized: { ja: '確定済み', en: 'Finalized' },
+            finalized: { ja: '確定済（編集不可）', en: 'Confirmed (Read-only)' },
             archived: { ja: 'アーカイブ', en: 'Archived' },
             suspended: { ja: '保留中', en: 'Suspended' },
         }
@@ -1064,7 +1064,7 @@ export default function RunDetailPage() {
                                     <LuCircleCheck size={20} color="var(--success)" />
                                     <div>
                                         <p style={{ fontWeight: 700, color: '#14532d' }}>
-                                            {locale === 'ja' ? '確定済み' : 'Finalized'}
+                                            {locale === 'ja' ? '確定済（編集不可）' : 'Confirmed (Read-only)'}
                                         </p>
                                         {run.finalized_at && (
                                             <p style={{ fontSize: 13, color: '#166534' }}>
