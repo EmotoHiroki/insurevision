@@ -29,6 +29,8 @@
     "@types/react": "^19",
     "@types/react-dom": "^19",
     "@vitest/coverage-v8": "^4.1.0",
+    "adm-zip": "^0.5.17",
+    "docx": "^9.6.1",
     "eslint": "^9",
     "eslint-config-next": "16.1.6",
     "tailwindcss": "^4",
