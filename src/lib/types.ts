@@ -1,8 +1,13 @@
 // =============================================
-// Database Types — M2 v1.0
+// Database Types — M3 v1.0
 // =============================================
 
-export type RunStatus = 'draft' | 'finalized' | 'archived' | 'suspended'
+export type RunStatus = 'draft' | 'finalized' | 'archived' | 'suspended' | 'post_record_pending'
+export type RecordingMode = 'realtime' | 'post_record'
+export type InputDevice = 'tablet_pc' | 'customer_smartphone' | 'agent_smartphone'
+export type PostRecordStatus = 'phase1_done' | 'phase2_done'
+export type DeliveryStatus = 'not_delivered' | 'delivered'
+export type ExclusionReasonCode = 'R-001' | 'R-002' | 'R-003' | 'R-004' | 'R-005' | 'R-999'
 export type SuspensionType = 'condition_adjustment' | 'mid_session'
 export type CustomerType = 'individual' | 'corporate'
 export type RunType = 'new_contract' | 'renewal'
@@ -42,6 +47,11 @@ export type AuditEventType =
     | 'run_finalized'
     | 'delivery_recorded'               // M2: 交付記録
     | 'redundancy_resolution_recorded'  // M2: 重複補償判定記録
+    | 'recording_mode_selected'         // M3: 記録方式選択
+    | 'post_record_phase1_completed'    // M3: 事後記録フェーズ1完了
+    | 'post_record_phase2_completed'    // M3: 事後記録フェーズ2完了
+    | 'agent_input_mode_activated'      // M3: 募集人入力モード起動
+    | 'exclusion_reason_coded'          // M3: 候補除外理由コード選択
 
 // =============================================
 // Table Interfaces
@@ -96,6 +106,15 @@ export interface Run {
     // M2: 交付記録
     delivery_method: DeliveryMethod | null
     delivery_confirmed_at: string | null
+    // M3: 交付記録拡張
+    delivery_status: DeliveryStatus | null
+    delivery_reference: string | null
+    // M3: 記録方式・入力デバイス
+    recording_mode: RecordingMode | null
+    input_device: InputDevice | null
+    post_record_status: PostRecordStatus | null
+    post_record_phase1_at: string | null
+    post_record_phase2_at: string | null
     // Finalize
     finalized_at: string | null
     finalized_by: string | null
@@ -163,6 +182,8 @@ export interface Candidate {
     // M2: 付帯状況3値化・車両別前提条件
     coverage_status: CoverageStatus | null
     vehicle_premises: Record<string, unknown>[] | null
+    // M3: 候補除外理由コード
+    exclusion_reason_code: ExclusionReasonCode | null
     status: CandidateStatus
     excluded_reason: string | null
     excluded_at: string | null

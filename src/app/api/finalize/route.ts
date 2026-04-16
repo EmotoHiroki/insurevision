@@ -51,6 +51,11 @@ export async function POST(request: Request) {
             return Response.json({ error: 'insurer_list_presented not recorded' }, { status: 422 })
         }
 
+        // G-21: post_record mode requires phase2 completion before finalize
+        if (run.recording_mode === 'post_record' && run.post_record_status !== 'phase2_done') {
+            return Response.json({ error: '事後記録のフェーズ2が完了していません' }, { status: 422 })
+        }
+
         // Normal path: compare_presented_at must be set
         if (!exceptionRoute && !run.compare_presented_at) {
             return Response.json({ error: 'compare_presented_at not set' }, { status: 422 })

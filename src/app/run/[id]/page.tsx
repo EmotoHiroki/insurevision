@@ -4,7 +4,7 @@ import React, { useEffect, useState, useCallback } from 'react'
 import { useRouter, useParams, useSearchParams } from 'next/navigation'
 import { createClient } from '@/lib/supabase/client'
 import { useLocale } from '@/lib/locale-context'
-import type { Run, Candidate, Operator, AuditEvent, Snapshot, CoverageStatus } from '@/lib/types'
+import type { Run, Candidate, Operator, AuditEvent, Snapshot, CoverageStatus, ExclusionReasonCode } from '@/lib/types'
 import { t as i18nT } from '@/lib/i18n'
 import { format } from 'date-fns'
 import {
@@ -97,6 +97,7 @@ export default function RunDetailPage() {
     // Exclusion inline form
     const [excludingId, setExcludingId] = useState<string | null>(null)
     const [exclusionReason, setExclusionReason] = useState('')
+    const [exclusionReasonCode, setExclusionReasonCode] = useState<ExclusionReasonCode | ''>('')
 
     // Finalize tab
     const [consentComparisonResult, setConsentComparisonResult] = useState(false)
@@ -106,9 +107,10 @@ export default function RunDetailPage() {
     const [savingMemo, setSavingMemo] = useState(false)
     // M2 Spec 1: coverage_status update
     const [updatingCoverage, setUpdatingCoverage] = useState<string | null>(null)
-    // D-B: delivery record
+    // D-B / G-10: delivery record
     const [deliveryMethod, setDeliveryMethod] = useState<string>('')
     const [deliveryConfirmed, setDeliveryConfirmed] = useState(false)
+    const [deliveryReference, setDeliveryReference] = useState('')
     const [savingDelivery, setSavingDelivery] = useState(false)
     // D-C: redundancy decisions
     const [redundancyDecisions, setRedundancyDecisions] = useState<Array<{ item_key: string; decision: 'keep' | 'remove'; reason: string }>>([])
@@ -147,6 +149,7 @@ export default function RunDetailPage() {
         if (runData) {
             setDeliveryMethod((runData as Run).delivery_method ?? '')
             setDeliveryConfirmed(!!(runData as Run).delivery_confirmed_at)
+            setDeliveryReference((runData as Run).delivery_reference ?? '')
         }
 
         const { data: candData } = await supabase.from('candidate').select('*').eq('run_id', runId).order('slot_no')
@@ -191,26 +194,43 @@ export default function RunDetailPage() {
     }
 
     const handleExcludeCandidate = async (candidateId: string) => {
-        if (!operator || !exclusionReason.trim()) return
+        if (!operator) return
+        // G-4: R-999 requires a memo
+        if (exclusionReasonCode === 'R-999' && !exclusionReason.trim()) {
+            showToast(locale === 'ja' ? 'R-999選択時はメモ入力が必須です' : 'Memo is required when R-999 is selected', 'error')
+            return
+        }
         setSaving(true)
         try {
             const supabase = createClient()
             await supabase.from('candidate').update({
                 status: 'excluded',
-                excluded_reason: exclusionReason.trim(),
+                exclusion_reason_code: exclusionReasonCode || null,
+                excluded_reason: exclusionReason.trim() || null,
                 excluded_by: operator.id,
                 excluded_at: new Date().toISOString(),
             }).eq('id', candidateId)
 
+            // M1: exclusion_reason_recorded (always)
             await supabase.from('audit_event').insert({
                 run_id: runId,
                 event_type: 'exclusion_reason_recorded',
                 operator_id: operator.id,
-                payload: { candidate_id: candidateId, reason: exclusionReason.trim() },
+                payload: { candidate_id: candidateId, reason: exclusionReason.trim() || null },
             })
+            // G-4: exclusion_reason_coded (when R-code selected)
+            if (exclusionReasonCode) {
+                await supabase.from('audit_event').insert({
+                    run_id: runId,
+                    event_type: 'exclusion_reason_coded',
+                    operator_id: operator.id,
+                    payload: { candidate_id: candidateId, code: exclusionReasonCode, memo: exclusionReason.trim() || null },
+                })
+            }
 
             setExcludingId(null)
             setExclusionReason('')
+            setExclusionReasonCode('')
             await loadData()
             showToast(locale === 'ja' ? '除外しました' : 'Candidate excluded')
         } catch (e: unknown) {
@@ -272,7 +292,7 @@ export default function RunDetailPage() {
         setUpdatingCoverage(null)
     }
 
-    // D-B: save delivery record
+    // G-10: save delivery record
     const handleSaveDelivery = async () => {
         if (!operator) return
         setSavingDelivery(true)
@@ -281,13 +301,15 @@ export default function RunDetailPage() {
         await supabase.from('run').update({
             delivery_method: deliveryMethod || null,
             delivery_confirmed_at: deliveryConfirmed ? now : null,
+            delivery_status: deliveryConfirmed ? 'delivered' : 'not_delivered',
+            delivery_reference: deliveryReference.trim() || null,
         }).eq('id', runId)
         if (deliveryConfirmed) {
             await supabase.from('audit_event').insert({
                 run_id: runId,
                 event_type: 'delivery_recorded' as const,
                 operator_id: operator.id,
-                payload: { delivery_method: deliveryMethod, confirmed_at: now },
+                payload: { delivery_method: deliveryMethod, confirmed_at: now, delivery_reference: deliveryReference.trim() || null },
             })
         }
         setSavingDelivery(false)
@@ -432,6 +454,7 @@ export default function RunDetailPage() {
             finalized: { ja: '確定済（編集不可）', en: 'Confirmed (Read-only)' },
             archived: { ja: 'アーカイブ', en: 'Archived' },
             suspended: { ja: '保留中', en: 'Suspended' },
+            post_record_pending: { ja: '事後記録待ち', en: 'Post-Record Pending' },
         }
         return locale === 'ja' ? (map[s]?.ja ?? s) : (map[s]?.en ?? s)
     }
@@ -839,19 +862,34 @@ export default function RunDetailPage() {
                                                         <div style={{ marginTop: 12 }}>
                                                             {excludingId === c.id ? (
                                                                 <div style={{ display: 'flex', gap: 6, flexDirection: 'column' }}>
+                                                                    <select className="form-select" value={exclusionReasonCode}
+                                                                        onChange={e => setExclusionReasonCode(e.target.value as ExclusionReasonCode | '')}
+                                                                        style={{ fontSize: 12, padding: '5px 8px' }}>
+                                                                        <option value="">{locale === 'ja' ? '除外理由コードを選択' : 'Select reason code'}</option>
+                                                                        <option value="R-001">R-001: {locale === 'ja' ? '保険料が予算を超過' : 'Premium exceeds budget'}</option>
+                                                                        <option value="R-002">R-002: {locale === 'ja' ? '補償内容が要件を満たさない' : 'Coverage insufficient'}</option>
+                                                                        <option value="R-003">R-003: {locale === 'ja' ? '代理店の取扱い対象外' : 'Not handled by agency'}</option>
+                                                                        <option value="R-004">R-004: {locale === 'ja' ? '顧客の希望により除外' : 'Excluded per customer request'}</option>
+                                                                        <option value="R-005">R-005: {locale === 'ja' ? '保険会社の引受条件により除外' : 'Insurer underwriting conditions'}</option>
+                                                                        <option value="R-999">R-999: {locale === 'ja' ? 'その他（メモ必須）' : 'Other (memo required)'}</option>
+                                                                    </select>
                                                                     <input className="form-input" value={exclusionReason} onChange={e => setExclusionReason(e.target.value)}
-                                                                        placeholder={locale === 'ja' ? '除外理由' : 'Exclusion reason'} />
+                                                                        placeholder={exclusionReasonCode === 'R-999'
+                                                                            ? (locale === 'ja' ? '補足メモ（必須）' : 'Memo (required)')
+                                                                            : (locale === 'ja' ? '補足メモ（任意）' : 'Memo (optional)')}
+                                                                        style={{ fontSize: 12 }} />
                                                                     <div style={{ display: 'flex', gap: 6 }}>
-                                                                        <button className="btn-danger" onClick={() => handleExcludeCandidate(c.id)} disabled={!exclusionReason.trim() || saving} style={{ fontSize: 12, padding: '5px 10px' }}>
+                                                                        <button className="btn-danger" onClick={() => handleExcludeCandidate(c.id)}
+                                                                            disabled={saving} style={{ fontSize: 12, padding: '5px 10px' }}>
                                                                             <LuCheck size={12} style={{ marginRight: 4 }} />{locale === 'ja' ? '確定' : 'Confirm'}
                                                                         </button>
-                                                                        <button className="btn-secondary" onClick={() => { setExcludingId(null); setExclusionReason('') }} style={{ fontSize: 12, padding: '5px 10px' }}>
+                                                                        <button className="btn-secondary" onClick={() => { setExcludingId(null); setExclusionReason(''); setExclusionReasonCode('') }} style={{ fontSize: 12, padding: '5px 10px' }}>
                                                                             {locale === 'ja' ? 'キャンセル' : 'Cancel'}
                                                                         </button>
                                                                     </div>
                                                                 </div>
                                                             ) : (
-                                                                <button onClick={() => { setExcludingId(c.id); setExclusionReason('') }} style={{
+                                                                <button onClick={() => { setExcludingId(c.id); setExclusionReason(''); setExclusionReasonCode('') }} style={{
                                                                     fontSize: 12, padding: '5px 10px', border: '1px solid var(--error)', color: 'var(--error)',
                                                                     background: 'transparent', borderRadius: 6, cursor: 'pointer', display: 'flex', alignItems: 'center', gap: 4,
                                                                 }}>
@@ -976,8 +1014,11 @@ export default function RunDetailPage() {
                                                     </div>
                                                 )}
 
-                                                {c.excluded_reason && (
+                                                {(c.exclusion_reason_code || c.excluded_reason) && (
                                                     <div style={{ fontSize: 12, color: 'var(--error)', marginTop: 8, background: 'rgba(198,40,40,0.05)', padding: '6px 10px', borderRadius: 6 }}>
+                                                        {c.exclusion_reason_code && (
+                                                            <span style={{ fontWeight: 700, marginRight: 6 }}>{c.exclusion_reason_code}</span>
+                                                        )}
                                                         {c.excluded_reason}
                                                     </div>
                                                 )}
@@ -1141,45 +1182,7 @@ export default function RunDetailPage() {
                                     )}
                                 </div>
 
-                                {/* D-B: 交付記録 */}
-                                <div className="section-card space-y-3">
-                                    <label style={{ fontSize: 14, fontWeight: 600, display: 'block' }}>
-                                        {locale === 'ja' ? '交付記録' : 'Delivery Record'}
-                                    </label>
-                                    <div>
-                                        <label className="form-label">{locale === 'ja' ? '交付方法' : 'Delivery Method'}</label>
-                                        <select value={deliveryMethod} onChange={e => setDeliveryMethod(e.target.value)}
-                                            disabled={!isEditable}
-                                            style={{ width: '100%', padding: '8px 10px', borderRadius: 8, border: '1px solid #e2e8f0', fontSize: 13 }}>
-                                            <option value="">{locale === 'ja' ? '選択してください' : 'Select'}</option>
-                                            <option value="hand">{locale === 'ja' ? '対面交付' : 'In-person'}</option>
-                                            <option value="mail">{locale === 'ja' ? '郵送' : 'Mail'}</option>
-                                            <option value="email">{locale === 'ja' ? 'メール' : 'Email'}</option>
-                                            <option value="digital">{locale === 'ja' ? 'デジタル交付' : 'Digital'}</option>
-                                        </select>
-                                    </div>
-                                    <label style={{ display: 'flex', alignItems: 'center', gap: 10, cursor: isEditable ? 'pointer' : 'default' }}>
-                                        <input type="checkbox" checked={deliveryConfirmed}
-                                            onChange={e => setDeliveryConfirmed(e.target.checked)}
-                                            disabled={!isEditable}
-                                            style={{ width: 16, height: 16 }} />
-                                        <span style={{ fontSize: 13 }}>
-                                            {locale === 'ja' ? '交付確認済み（お客様に書類を交付しました）' : 'Delivery confirmed (documents handed to customer)'}
-                                        </span>
-                                    </label>
-                                    {run.delivery_confirmed_at && (
-                                        <p style={{ fontSize: 12, color: 'var(--text-secondary)' }}>
-                                            {locale === 'ja' ? '交付確認日時: ' : 'Confirmed at: '}
-                                            {format(new Date(run.delivery_confirmed_at), 'yyyy/MM/dd HH:mm')}
-                                        </p>
-                                    )}
-                                    {isEditable && (
-                                        <button type="button" disabled={savingDelivery} onClick={handleSaveDelivery}
-                                            style={{ fontSize: 13, padding: '6px 14px', borderRadius: 6, border: '1px solid #cbd5e1', background: 'white', cursor: 'pointer' }}>
-                                            {savingDelivery ? '...' : (locale === 'ja' ? '保存' : 'Save')}
-                                        </button>
-                                    )}
-                                </div>
+                                {/* G-10: 交付記録（draft時は確定前入力、finalized後も更新可）*/}
 
                                 {/* Consent for compare path */}
                                 {run.customer_decision === 'compare' && (
@@ -1221,6 +1224,72 @@ export default function RunDetailPage() {
                                 )}
                             </>
                         )}
+                    </div>
+                )}
+
+                {/* G-10: 交付記録 — always shown on finalize tab (post-finalize recording) */}
+                {activeTab === 'finalize' && (
+                    <div className="section-card animate-fade-in" style={{ marginTop: 16 }}>
+                        <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: 14 }}>
+                            <label style={{ fontSize: 14, fontWeight: 600 }}>
+                                {locale === 'ja' ? '交付記録' : 'Delivery Record'}
+                            </label>
+                            <span style={{
+                                fontSize: 12, fontWeight: 700, padding: '3px 10px', borderRadius: 10,
+                                background: run.delivery_status === 'delivered' ? 'rgba(46,125,50,0.1)' : 'rgba(120,144,156,0.12)',
+                                color: run.delivery_status === 'delivered' ? 'var(--success)' : 'var(--status-draft)',
+                            }}>
+                                {run.delivery_status === 'delivered'
+                                    ? (locale === 'ja' ? '交付済み' : 'Delivered')
+                                    : (locale === 'ja' ? '未交付' : 'Not Delivered')}
+                            </span>
+                        </div>
+                        <div style={{ display: 'grid', gap: 12 }}>
+                            <div>
+                                <label className="form-label">{locale === 'ja' ? '交付方法' : 'Delivery Method'}</label>
+                                <select className="form-select" value={deliveryMethod} onChange={e => setDeliveryMethod(e.target.value)}
+                                    disabled={run.delivery_status === 'delivered'}>
+                                    <option value="">{locale === 'ja' ? '選択してください' : 'Select'}</option>
+                                    <option value="hand">{locale === 'ja' ? '対面交付' : 'In-person'}</option>
+                                    <option value="mail">{locale === 'ja' ? '郵送' : 'Mail'}</option>
+                                    <option value="email">{locale === 'ja' ? 'メール' : 'Email'}</option>
+                                    <option value="digital">{locale === 'ja' ? 'デジタル交付' : 'Digital'}</option>
+                                </select>
+                            </div>
+                            {(deliveryMethod === 'mail' || deliveryMethod === 'digital' || deliveryMethod === 'email') && (
+                                <div>
+                                    <label className="form-label">{locale === 'ja' ? '参照番号（任意）' : 'Reference No. (optional)'}</label>
+                                    <input className="form-input" value={deliveryReference}
+                                        onChange={e => setDeliveryReference(e.target.value)}
+                                        disabled={run.delivery_status === 'delivered'}
+                                        placeholder={locale === 'ja' ? '例: POST-2026-001' : 'e.g. POST-2026-001'} />
+                                    <p style={{ fontSize: 11, color: 'var(--text-secondary)', marginTop: 4 }}>
+                                        {locale === 'ja' ? '郵送・デジタル交付時の管理番号' : 'Tracking/reference number for mail or digital delivery'}
+                                    </p>
+                                </div>
+                            )}
+                            <label style={{ display: 'flex', alignItems: 'center', gap: 10, cursor: run.delivery_status === 'delivered' ? 'default' : 'pointer' }}>
+                                <input type="checkbox" checked={deliveryConfirmed}
+                                    onChange={e => setDeliveryConfirmed(e.target.checked)}
+                                    disabled={run.delivery_status === 'delivered'}
+                                    style={{ width: 16, height: 16 }} />
+                                <span style={{ fontSize: 13 }}>
+                                    {locale === 'ja' ? '交付確認済み（お客様に書類を交付しました）' : 'Delivery confirmed (documents handed to customer)'}
+                                </span>
+                            </label>
+                            {run.delivery_confirmed_at && (
+                                <p style={{ fontSize: 12, color: 'var(--text-secondary)' }}>
+                                    {locale === 'ja' ? '交付確認日時: ' : 'Confirmed at: '}
+                                    {format(new Date(run.delivery_confirmed_at), 'yyyy/MM/dd HH:mm')}
+                                </p>
+                            )}
+                            {run.delivery_status !== 'delivered' && (
+                                <button type="button" disabled={savingDelivery || !deliveryMethod} onClick={handleSaveDelivery}
+                                    style={{ fontSize: 13, padding: '6px 14px', borderRadius: 6, border: '1px solid #cbd5e1', background: 'white', cursor: 'pointer', width: 'fit-content' }}>
+                                    {savingDelivery ? '...' : (locale === 'ja' ? '保存' : 'Save')}
+                                </button>
+                            )}
+                        </div>
                     </div>
                 )}
 
