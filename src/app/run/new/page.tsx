@@ -5,6 +5,7 @@ import { useRouter } from 'next/navigation'
 import {
     Shield, Globe, ArrowLeft, Check,
     User, Building, FilePlus, RefreshCw,
+    Zap, Clock, Monitor, Smartphone, UserCog,
 } from 'lucide-react'
 import { createClient } from '@/lib/supabase/client'
 import { useLocale } from '@/lib/locale-context'
@@ -13,7 +14,7 @@ import Step2IssueSharing from './_steps/Step2IssueSharing'
 import Step3Intent, { type Step3Data } from './_steps/Step3Intent'
 import Step4Scope, { type Step4Data } from './_steps/Step4Scope'
 import Step5Priority, { type Step5Data } from './_steps/Step5Priority'
-import type { CustomerType, RunType, CustomerDecision, AuditEventInsert } from '@/lib/types'
+import type { CustomerType, RunType, CustomerDecision, AuditEventInsert, RecordingMode, InputDevice } from '@/lib/types'
 
 // ─────────────────────────────────────────────
 // Wizard step definitions
@@ -37,6 +38,9 @@ export default function NewRunPage() {
     const [corporateDecisionMaker, setCorporateDecisionMaker] = useState('')  // G-3
     const [runType, setRunType] = useState<RunType>('new_contract')
     const [isTest, setIsTest] = useState(false)
+    // G-20 / G-23: 2-axis recording mode + device selection
+    const [recordingMode, setRecordingMode] = useState<RecordingMode>('realtime')
+    const [inputDevice, setInputDevice] = useState<InputDevice>('tablet_pc')
     const [basicsError, setBasicsError] = useState('')
     const [basicsComplete, setBasicsComplete] = useState(false)
 
@@ -134,6 +138,8 @@ export default function NewRunPage() {
                 intent_confirmed_with: intentData.intentConfirmedWith || null,
                 diagnosis_memo: diagnosisMemo,
                 condition_change_note: step1Data.conditionChangeNote || null,
+                recording_mode: recordingMode,
+                input_device: inputDevice,
                 run_status: 'draft',
                 export_status: 'pending',
             }).select().single()
@@ -192,6 +198,23 @@ export default function NewRunPage() {
                     },
                 },
             ]
+
+            // G-20/G-23: recording mode selected — always fires
+            events.push({
+                run_id: runId,
+                event_type: 'recording_mode_selected' as const,
+                operator_id: op.id,
+                payload: { recording_mode: recordingMode, input_device: inputDevice },
+            })
+            // G-23: agent_input_mode_activated — fires when agent_smartphone selected
+            if (inputDevice === 'agent_smartphone') {
+                events.push({
+                    run_id: runId,
+                    event_type: 'agent_input_mode_activated' as const,
+                    operator_id: op.id,
+                    payload: { input_device: inputDevice },
+                })
+            }
 
             // comparison_waiver_confirmed event for comparison_waived path
             if (intentData.customerDecision === 'comparison_waived') {
@@ -501,6 +524,85 @@ export default function NewRunPage() {
                                         </label>
                                     ))}
                                 </div>
+                            </div>
+
+                            {/* G-20: 記録方式 */}
+                            <div>
+                                <label className="form-label">
+                                    {locale === 'ja' ? '記録方式' : 'Recording Mode'}
+                                    <span className="badge-required">
+                                        {locale === 'ja' ? '必須' : 'Required'}
+                                    </span>
+                                </label>
+                                <div className="grid grid-cols-2 gap-3 mt-2">
+                                    {(
+                                        [
+                                            { value: 'realtime' as RecordingMode, icon: Zap, labelJa: 'リアルタイム記録', labelEn: 'Real-time', descJa: '面談中にその場で入力', descEn: 'Enter during the meeting' },
+                                            { value: 'post_record' as RecordingMode, icon: Clock, labelJa: '事後記録', labelEn: 'Post-record', descJa: '面談後に後日入力', descEn: 'Enter after the meeting' },
+                                        ]
+                                    ).map(({ value, icon: Icon, labelJa, labelEn, descJa, descEn }) => (
+                                        <label
+                                            key={value}
+                                            className={`radio-card cursor-pointer flex flex-col gap-1 ${recordingMode === value ? 'ring-2 ring-blue-500' : ''}`}
+                                        >
+                                            <input
+                                                type="radio"
+                                                name="recordingMode"
+                                                value={value}
+                                                checked={recordingMode === value}
+                                                onChange={() => setRecordingMode(value)}
+                                                className="sr-only"
+                                            />
+                                            <div className="flex items-center gap-2">
+                                                <Icon size={16} className={recordingMode === value ? 'text-blue-600' : 'text-gray-400'} />
+                                                <span className="text-sm font-medium">{locale === 'ja' ? labelJa : labelEn}</span>
+                                            </div>
+                                            <span className="text-xs text-gray-500">{locale === 'ja' ? descJa : descEn}</span>
+                                        </label>
+                                    ))}
+                                </div>
+                            </div>
+
+                            {/* G-23: 入力デバイス */}
+                            <div>
+                                <label className="form-label">
+                                    {locale === 'ja' ? '入力デバイス' : 'Input Device'}
+                                    <span className="badge-required">
+                                        {locale === 'ja' ? '必須' : 'Required'}
+                                    </span>
+                                </label>
+                                <div className="grid grid-cols-3 gap-3 mt-2">
+                                    {(
+                                        [
+                                            { value: 'tablet_pc' as InputDevice, icon: Monitor, labelJa: 'タブレット/PC', labelEn: 'Tablet/PC' },
+                                            { value: 'customer_smartphone' as InputDevice, icon: Smartphone, labelJa: 'お客様スマホ', labelEn: 'Customer Phone' },
+                                            { value: 'agent_smartphone' as InputDevice, icon: UserCog, labelJa: '募集人スマホ', labelEn: 'Agent Phone' },
+                                        ]
+                                    ).map(({ value, icon: Icon, labelJa, labelEn }) => (
+                                        <label
+                                            key={value}
+                                            className={`radio-card cursor-pointer flex items-center gap-2 ${inputDevice === value ? 'ring-2 ring-blue-500' : ''}`}
+                                        >
+                                            <input
+                                                type="radio"
+                                                name="inputDevice"
+                                                value={value}
+                                                checked={inputDevice === value}
+                                                onChange={() => setInputDevice(value)}
+                                                className="sr-only"
+                                            />
+                                            <Icon size={16} className={inputDevice === value ? 'text-blue-600' : 'text-gray-400'} />
+                                            <span className="text-sm font-medium">{locale === 'ja' ? labelJa : labelEn}</span>
+                                        </label>
+                                    ))}
+                                </div>
+                                {inputDevice === 'agent_smartphone' && (
+                                    <p className="text-xs text-amber-600 mt-2">
+                                        {locale === 'ja'
+                                            ? '※ 募集人が代行入力します。確認文言が「説明しました」形式に切り替わります。'
+                                            : '※ Agent enters on behalf of customer. Confirmation wording switches to agent-input format.'}
+                                    </p>
+                                )}
                             </div>
 
                             {/* Test flag */}

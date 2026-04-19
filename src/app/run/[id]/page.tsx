@@ -608,6 +608,24 @@ export default function RunDetailPage() {
                                         <dd>{run.compliance_mode === 'full' ? i18nT(locale, 'complianceFull') : i18nT(locale, 'complianceException')}</dd>
                                     </div>
                                 )}
+                                {run.recording_mode && (
+                                    <div>
+                                        <dt className="form-label">{locale === 'ja' ? '記録方式' : 'Recording Mode'}</dt>
+                                        <dd>{run.recording_mode === 'realtime'
+                                            ? (locale === 'ja' ? 'リアルタイム記録' : 'Real-time')
+                                            : (locale === 'ja' ? '事後記録' : 'Post-record')}</dd>
+                                    </div>
+                                )}
+                                {run.input_device && (
+                                    <div>
+                                        <dt className="form-label">{locale === 'ja' ? '入力デバイス' : 'Input Device'}</dt>
+                                        <dd>{{
+                                            tablet_pc: locale === 'ja' ? 'タブレット/PC' : 'Tablet/PC',
+                                            customer_smartphone: locale === 'ja' ? 'お客様スマートフォン' : 'Customer Smartphone',
+                                            agent_smartphone: locale === 'ja' ? '募集人スマートフォン' : 'Agent Smartphone',
+                                        }[run.input_device] ?? run.input_device}</dd>
+                                    </div>
+                                )}
                                 {run.finalized_at && (
                                     <div>
                                         <dt className="form-label">{i18nT(locale, 'finalizedAt')}</dt>
@@ -1187,6 +1205,11 @@ export default function RunDetailPage() {
                                 {/* Consent for compare path */}
                                 {run.customer_decision === 'compare' && (
                                     <div className="section-card">
+                                        {run.input_device === 'agent_smartphone' && (
+                                            <p style={{ fontSize: 12, color: '#92400e', background: '#fffbeb', padding: '6px 10px', borderRadius: 6, marginBottom: 10 }}>
+                                                {locale === 'ja' ? '※ 募集人スマートフォンモード：募集人が代行確認します' : '※ Agent smartphone mode: agent confirms on behalf of customer'}
+                                            </p>
+                                        )}
                                         <label style={{ display: 'flex', alignItems: 'start', gap: 12, cursor: 'pointer' }}>
                                             <input
                                                 type="checkbox"
@@ -1194,7 +1217,11 @@ export default function RunDetailPage() {
                                                 onChange={e => setConsentComparisonResult(e.target.checked)}
                                                 style={{ marginTop: 2, width: 16, height: 16 }}
                                             />
-                                            <span style={{ fontSize: 14 }}>{i18nT(locale, 'consentComparisonResult')}</span>
+                                            <span style={{ fontSize: 14 }}>
+                                                {run.input_device === 'agent_smartphone'
+                                                    ? (locale === 'ja' ? '比較結果を説明しました（募集人代行確認）' : 'Comparison result explained (agent confirmation)')
+                                                    : i18nT(locale, 'consentComparisonResult')}
+                                            </span>
                                         </label>
                                     </div>
                                 )}
