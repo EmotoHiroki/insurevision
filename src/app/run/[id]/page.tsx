@@ -376,6 +376,67 @@ export default function RunDetailPage() {
     }
 
     // ─────────────────────────────────────────────
+    // G-21: 事後記録フェーズ1完了
+    // ─────────────────────────────────────────────
+    const [completingPhase1, setCompletingPhase1] = useState(false)
+    const handleCompletePhase1 = async () => {
+        if (!operator || !run) return
+        if (!run.compare_presented_at) {
+            showToast(locale === 'ja' ? '比較提示が未完了です' : 'Comparison must be presented first', 'error')
+            return
+        }
+        setCompletingPhase1(true)
+        try {
+            const supabase = createClient()
+            const now = new Date().toISOString()
+            const { error: upErr } = await supabase.from('run').update({
+                run_status: 'post_record_pending',
+                post_record_status: 'phase1_done',
+                post_record_phase1_at: now,
+            }).eq('id', runId)
+            if (upErr) throw upErr
+            await supabase.from('audit_event').insert({
+                run_id: runId,
+                event_type: 'post_record_phase1_completed' as const,
+                operator_id: operator.id,
+                payload: { phase1_at: now },
+            })
+            showToast(locale === 'ja' ? 'フェーズ1を完了しました' : 'Phase 1 completed')
+            await loadData()
+        } catch (e: unknown) {
+            showToast(e instanceof Error ? e.message : 'Error', 'error')
+        } finally { setCompletingPhase1(false) }
+    }
+
+    // ─────────────────────────────────────────────
+    // G-21: 事後記録フェーズ2完了
+    // ─────────────────────────────────────────────
+    const [completingPhase2, setCompletingPhase2] = useState(false)
+    const handleCompletePhase2 = async () => {
+        if (!operator || !run) return
+        setCompletingPhase2(true)
+        try {
+            const supabase = createClient()
+            const now = new Date().toISOString()
+            const { error: upErr } = await supabase.from('run').update({
+                post_record_status: 'phase2_done',
+                post_record_phase2_at: now,
+            }).eq('id', runId)
+            if (upErr) throw upErr
+            await supabase.from('audit_event').insert({
+                run_id: runId,
+                event_type: 'post_record_phase2_completed' as const,
+                operator_id: operator.id,
+                payload: { phase2_at: now },
+            })
+            showToast(locale === 'ja' ? 'フェーズ2を完了しました' : 'Phase 2 completed')
+            await loadData()
+        } catch (e: unknown) {
+            showToast(e instanceof Error ? e.message : 'Error', 'error')
+        } finally { setCompletingPhase2(false) }
+    }
+
+    // ─────────────────────────────────────────────
     // Finalize
     // ─────────────────────────────────────────────
     const handleFinalize = async () => {
@@ -479,7 +540,8 @@ export default function RunDetailPage() {
         )
     }
 
-    const isEditable = run.run_status === 'draft'
+    // G-21: post_record_pending is also editable (for phase 2 input like resolution memo + consents)
+    const isEditable = run.run_status === 'draft' || run.run_status === 'post_record_pending'
     const activeCandidates = candidates.filter(c => c.status === 'active')
 
     const TABS: Array<{ key: TabKey; labelJa: string; labelEn: string; icon: React.ElementType }> = [
@@ -1117,6 +1179,47 @@ export default function RunDetailPage() {
                 {/* ═══════════════════════════════════════ */}
                 {activeTab === 'finalize' && (
                     <div className="animate-fade-in space-y-6">
+                        {/* G-21: Phase 1 summary banner — shown when post_record_pending */}
+                        {run.run_status === 'post_record_pending' && run.post_record_phase1_at && (() => {
+                            const phase1Date = new Date(run.post_record_phase1_at)
+                            const deadline = new Date(phase1Date.getTime() + 7 * 24 * 60 * 60 * 1000)
+                            const now = new Date()
+                            const overdue = now > deadline && run.post_record_status !== 'phase2_done'
+                            const phase2Done = run.post_record_status === 'phase2_done'
+                            return (
+                                <div className="section-card" style={{
+                                    background: overdue ? '#fef2f2' : (phase2Done ? '#f0fdf4' : '#fffbeb'),
+                                    borderColor: overdue ? '#fca5a5' : (phase2Done ? '#86efac' : '#fcd34d'),
+                                }}>
+                                    <div style={{ display: 'flex', alignItems: 'start', gap: 12 }}>
+                                        <LuClock size={20} color={overdue ? 'var(--error)' : (phase2Done ? 'var(--success)' : '#b45309')} />
+                                        <div style={{ flex: 1 }}>
+                                            <p style={{ fontWeight: 700, marginBottom: 4, color: overdue ? '#991b1b' : (phase2Done ? '#14532d' : '#78350f') }}>
+                                                {phase2Done
+                                                    ? (locale === 'ja' ? '事後記録フェーズ2完了 — Finalize可能' : 'Post-record Phase 2 complete — ready to finalize')
+                                                    : (locale === 'ja' ? '事後記録待ち — フェーズ2入力が必要です' : 'Post-record pending — Phase 2 input required')}
+                                            </p>
+                                            <p style={{ fontSize: 13, color: phase2Done ? '#166534' : '#78350f' }}>
+                                                {locale === 'ja' ? 'フェーズ1完了日時: ' : 'Phase 1 completed: '}
+                                                {format(phase1Date, 'yyyy/MM/dd HH:mm')}
+                                            </p>
+                                            <p style={{ fontSize: 13, color: overdue ? '#991b1b' : '#78350f', fontWeight: overdue ? 700 : 400 }}>
+                                                {locale === 'ja' ? '後日入力期限: ' : 'Phase 2 deadline: '}
+                                                {format(deadline, 'yyyy/MM/dd HH:mm')}
+                                                {overdue && (locale === 'ja' ? '（期限超過）' : ' (overdue)')}
+                                            </p>
+                                            {run.post_record_phase2_at && (
+                                                <p style={{ fontSize: 13, color: '#166534' }}>
+                                                    {locale === 'ja' ? 'フェーズ2完了日時: ' : 'Phase 2 completed: '}
+                                                    {format(new Date(run.post_record_phase2_at), 'yyyy/MM/dd HH:mm')}
+                                                </p>
+                                            )}
+                                        </div>
+                                    </div>
+                                </div>
+                            )
+                        })()}
+
                         {run.run_status === 'finalized' ? (
                             <div className="section-card" style={{ background: '#f0fdf4', borderColor: '#86efac' }}>
                                 <div style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
@@ -1232,22 +1335,60 @@ export default function RunDetailPage() {
                                     </div>
                                 )}
 
-                                <button
-                                    className="btn-primary"
-                                    style={{ width: '100%', opacity: allPreflightPass ? 1 : 0.4 }}
-                                    disabled={!allPreflightPass || finalizing || !isEditable}
-                                    onClick={handleFinalize}
-                                >
-                                    <LuLock size={16} style={{ marginRight: 6 }} />
-                                    {finalizing
-                                        ? (locale === 'ja' ? '確定中...' : 'Finalizing...')
-                                        : i18nT(locale, 'finalize')}
-                                </button>
-
-                                {!allPreflightPass && (
-                                    <p style={{ fontSize: 13, color: 'var(--text-secondary)', textAlign: 'center' }}>
-                                        {i18nT(locale, 'finalizeBlocked')}
-                                    </p>
+                                {/* G-21: Phase-aware action button */}
+                                {run.recording_mode === 'post_record' && run.run_status === 'draft' && run.customer_decision === 'compare' ? (
+                                    // post_record mode, phase 1 not yet completed → show Phase 1 button
+                                    <>
+                                        <button
+                                            className="btn-primary"
+                                            style={{ width: '100%', background: '#b45309', opacity: run.compare_presented_at ? 1 : 0.4 }}
+                                            disabled={!run.compare_presented_at || completingPhase1}
+                                            onClick={handleCompletePhase1}
+                                        >
+                                            <LuClock size={16} style={{ marginRight: 6 }} />
+                                            {completingPhase1
+                                                ? (locale === 'ja' ? 'フェーズ1完了中...' : 'Completing Phase 1...')
+                                                : (locale === 'ja' ? 'フェーズ1完了（面談終了）' : 'Complete Phase 1 (end meeting)')}
+                                        </button>
+                                        {!run.compare_presented_at && (
+                                            <p style={{ fontSize: 13, color: 'var(--text-secondary)', textAlign: 'center' }}>
+                                                {locale === 'ja' ? '比較提示の完了後にフェーズ1を完了できます' : 'Phase 1 can be completed after comparison is presented'}
+                                            </p>
+                                        )}
+                                    </>
+                                ) : run.run_status === 'post_record_pending' && run.post_record_status !== 'phase2_done' ? (
+                                    // post_record_pending, phase 2 not yet completed → show Phase 2 button
+                                    <button
+                                        className="btn-primary"
+                                        style={{ width: '100%', background: '#0891b2' }}
+                                        disabled={completingPhase2}
+                                        onClick={handleCompletePhase2}
+                                    >
+                                        <LuCheck size={16} style={{ marginRight: 6 }} />
+                                        {completingPhase2
+                                            ? (locale === 'ja' ? 'フェーズ2完了中...' : 'Completing Phase 2...')
+                                            : (locale === 'ja' ? 'フェーズ2完了（後日記録完了）' : 'Complete Phase 2 (finish post-record)')}
+                                    </button>
+                                ) : (
+                                    // Normal finalize (realtime OR post_record with phase2_done)
+                                    <>
+                                        <button
+                                            className="btn-primary"
+                                            style={{ width: '100%', opacity: allPreflightPass ? 1 : 0.4 }}
+                                            disabled={!allPreflightPass || finalizing || !isEditable}
+                                            onClick={handleFinalize}
+                                        >
+                                            <LuLock size={16} style={{ marginRight: 6 }} />
+                                            {finalizing
+                                                ? (locale === 'ja' ? '確定中...' : 'Finalizing...')
+                                                : i18nT(locale, 'finalize')}
+                                        </button>
+                                        {!allPreflightPass && (
+                                            <p style={{ fontSize: 13, color: 'var(--text-secondary)', textAlign: 'center' }}>
+                                                {i18nT(locale, 'finalizeBlocked')}
+                                            </p>
+                                        )}
+                                    </>
                                 )}
                             </>
                         )}

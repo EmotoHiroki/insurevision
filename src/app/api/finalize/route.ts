@@ -25,7 +25,8 @@ export async function POST(request: Request) {
             .from('run').select('*').eq('id', runId).single()
         if (runErr || !run) return Response.json({ error: 'run not found' }, { status: 404 })
 
-        if (run.run_status !== 'draft') {
+        // G-21: allow 'draft' or 'post_record_pending' (post_record flow finalizes from post_record_pending)
+        if (run.run_status !== 'draft' && run.run_status !== 'post_record_pending') {
             return Response.json({ error: 'already finalized' }, { status: 400 })
         }
 

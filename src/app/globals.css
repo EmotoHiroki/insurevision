@@ -149,6 +149,16 @@ textarea {
   color: var(--status-cancelled);
 }
 
+.status-post_record_pending {
+  background: rgba(245, 158, 11, 0.12);
+  color: #b45309;
+}
+
+.status-suspended {
+  background: rgba(147, 51, 234, 0.12);
+  color: #7e22ce;
+}
+
 /* Button base */
 .btn-primary {
   background: var(--primary);
@@ -430,4 +440,60 @@ textarea {
 
 .toast-info {
   background: var(--info);
+}
+
+/* ═══════════════════════════════════════════════════ */
+/* G-25: Smartphone responsive UI (≤767px)             */
+/* お客様確認画面のスマホ対応                            */
+/* ═══════════════════════════════════════════════════ */
+@media (max-width: 767px) {
+  /* Minimum readable font for customer-facing screens */
+  body {
+    font-size: 16px;
+  }
+
+  /* Section cards take full viewport width with tighter padding */
+  .section-card {
+    padding: 14px !important;
+    border-radius: 10px;
+  }
+
+  /* Primary/secondary buttons become full-width for thumb-friendly tapping */
+  .btn-primary,
+  .btn-secondary,
+  .btn-danger {
+    width: 100%;
+    padding: 14px 20px;
+    font-size: 16px;
+  }
+
+  /* Form inputs sized for mobile */
+  .form-input,
+  .form-select {
+    font-size: 16px;
+    padding: 12px 14px;
+  }
+
+  /* Comparison table: horizontal scroll + sticky first column for candidate comparison */
+  .mobile-scroll-x {
+    overflow-x: auto;
+    -webkit-overflow-scrolling: touch;
+  }
+
+  /* Checklist / radio card grids stack vertically */
+  .grid-cols-2,
+  .grid-cols-3 {
+    grid-template-columns: 1fr !important;
+  }
+
+  /* Radio cards: full width single column */
+  .radio-card {
+    padding: 14px;
+  }
+
+  /* Tabs stack wrap on very small screens */
+  .tab-bar-responsive {
+    flex-wrap: wrap;
+    gap: 2px;
+  }
 }
