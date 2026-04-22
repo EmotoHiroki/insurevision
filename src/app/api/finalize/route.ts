@@ -53,7 +53,8 @@ export async function POST(request: Request) {
         }
 
         // G-21: post_record mode requires phase2 completion before finalize
-        if (run.recording_mode === 'post_record' && run.post_record_status !== 'phase2_done') {
+        // Skipped for exception routes (non-compare decisions have nothing to post-record)
+        if (!exceptionRoute && run.recording_mode === 'post_record' && run.post_record_status !== 'phase2_done') {
             return Response.json({ error: '事後記録のフェーズ2が完了していません' }, { status: 422 })
         }
 

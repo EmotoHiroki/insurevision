@@ -121,6 +121,9 @@ export default function RunDetailPage() {
     const [suspensionType, setSuspensionType] = useState<'condition_adjustment' | 'mid_session'>('condition_adjustment')
     const [pendingNote, setPendingNote] = useState('')
     const [suspending, setSuspending] = useState(false)
+    // G-21: post-record phase completion state
+    const [completingPhase1, setCompletingPhase1] = useState(false)
+    const [completingPhase2, setCompletingPhase2] = useState(false)
 
     // ─────────────────────────────────────────────
     const showToast = (msg: string, type: 'success' | 'error' = 'success') => {
@@ -378,7 +381,6 @@ export default function RunDetailPage() {
     // ─────────────────────────────────────────────
     // G-21: 事後記録フェーズ1完了
     // ─────────────────────────────────────────────
-    const [completingPhase1, setCompletingPhase1] = useState(false)
     const handleCompletePhase1 = async () => {
         if (!operator || !run) return
         if (!run.compare_presented_at) {
@@ -411,7 +413,6 @@ export default function RunDetailPage() {
     // ─────────────────────────────────────────────
     // G-21: 事後記録フェーズ2完了
     // ─────────────────────────────────────────────
-    const [completingPhase2, setCompletingPhase2] = useState(false)
     const handleCompletePhase2 = async () => {
         if (!operator || !run) return
         setCompletingPhase2(true)
