@@ -452,6 +452,25 @@ textarea {
     font-size: 16px;
   }
 
+  /* Tighter page padding on mobile */
+  main, [class*="max-w-"] {
+    padding-left: 12px !important;
+    padding-right: 12px !important;
+  }
+
+  /* Header: prevent title from wrapping; shrink font; hide non-essential controls */
+  header {
+    padding: 0 12px !important;
+  }
+  header [class*="font-semibold"],
+  header span[style*="font-weight"] {
+    font-size: 14px;
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    max-width: 120px;
+  }
+
   /* Section cards take full viewport width with tighter padding */
   .section-card {
     padding: 14px !important;
@@ -486,14 +505,39 @@ textarea {
     grid-template-columns: 1fr !important;
   }
 
+  /* Any multi-column grid-template inline style collapses to one column on mobile */
+  [style*="grid-template-columns: 1fr 1fr"],
+  [style*="grid-template-columns:1fr 1fr"],
+  [style*="grid-template-columns: repeat(2"],
+  [style*="grid-template-columns: repeat(3"],
+  [style*="grid-template-columns: repeat(4"],
+  [style*="grid-template-columns: 2fr"],
+  [style*="repeat(${"] {
+    grid-template-columns: 1fr !important;
+  }
+
   /* Radio cards: full width single column */
   .radio-card {
     padding: 14px;
   }
 
-  /* Tabs stack wrap on very small screens */
-  .tab-bar-responsive {
-    flex-wrap: wrap;
-    gap: 2px;
+  /* M3 tab bar: compact horizontal layout (text stays on single line) */
+  .m3-tab-bar {
+    overflow-x: auto;
+    -webkit-overflow-scrolling: touch;
+  }
+  .m3-tab-btn {
+    flex: 1 1 0 !important;
+    padding: 8px 6px !important;
+    font-size: 12px !important;
+    gap: 4px !important;
+    white-space: nowrap;
+    min-width: 0;
+  }
+
+  /* M3 candidate comparison grid: stack vertically on mobile */
+  .m3-candidate-grid,
+  .m3-two-col-grid {
+    grid-template-columns: 1fr !important;
   }
 }

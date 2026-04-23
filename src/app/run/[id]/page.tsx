@@ -593,7 +593,7 @@ export default function RunDetailPage() {
 
             <div style={{ maxWidth: 1280, margin: '0 auto', padding: 28 }}>
                 {/* Tabs */}
-                <div style={{
+                <div className="m3-tab-bar" style={{
                     display: 'flex', gap: 4, marginBottom: 24, background: 'white',
                     borderRadius: 10, padding: 4, boxShadow: '0 1px 3px rgba(0,0,0,0.04)',
                 }}>
@@ -601,6 +601,7 @@ export default function RunDetailPage() {
                         <button
                             key={tab.key}
                             onClick={() => setActiveTab(tab.key)}
+                            className="m3-tab-btn"
                             style={{
                                 flex: 1, padding: '10px 16px', border: 'none', borderRadius: 8, cursor: 'pointer',
                                 fontWeight: 500, fontSize: 14, display: 'flex', alignItems: 'center',
@@ -619,7 +620,7 @@ export default function RunDetailPage() {
                 {/* TAB: OVERVIEW                           */}
                 {/* ═══════════════════════════════════════ */}
                 {activeTab === 'overview' && (
-                    <div className="animate-fade-in" style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 16 }}>
+                    <div className="animate-fade-in m3-two-col-grid" style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 16 }}>
                         {/* Basic info */}
                         <div className="section-card">
                             <h3 style={{ fontSize: 16, fontWeight: 600, marginBottom: 16, display: 'flex', alignItems: 'center', gap: 8 }}>
@@ -916,7 +917,7 @@ export default function RunDetailPage() {
                             )
                             return (
                                 <>
-                                    <div style={{ display: 'grid', gridTemplateColumns: `repeat(${orderedCandidates.length}, 1fr)`, gap: 16 }}>
+                                    <div className="m3-candidate-grid" style={{ display: 'grid', gridTemplateColumns: `repeat(${orderedCandidates.length}, 1fr)`, gap: 16 }}>
                                         {orderedCandidates.map(c => {
                                             const meta = ROLE_META[c.role ?? ''] ?? { ja: c.role ?? '', en: c.role ?? '', color: 'var(--primary)' }
                                             const isReadonly = c.role === 'prior'
@@ -1004,7 +1005,7 @@ export default function RunDetailPage() {
                                     </div>
                                 )}
                                 {activeCandidates.length > 0 && (
-                                    <div style={{ display: 'grid', gridTemplateColumns: `repeat(${activeCandidates.length}, 1fr)`, gap: 16 }}>
+                                    <div className="m3-candidate-grid" style={{ display: 'grid', gridTemplateColumns: `repeat(${activeCandidates.length}, 1fr)`, gap: 16 }}>
                                         {activeCandidates.map(c => (
                                             <div key={c.id} className="section-card" style={{
                                                 borderTop: `3px solid ${c.role === 'current' ? '#6366f1' : c.role === 'recommended' ? 'var(--success)' : 'var(--primary)'}`,
