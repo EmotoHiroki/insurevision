@@ -92,7 +92,13 @@ function buildMinimalProofStub(
 
 /** Mirrors validateFinalizeRequest() in src/app/api/finalize/route.ts */
 interface FinalizeInput {
-    run: { run_status: string; customer_decision?: string | null; compare_presented_at?: string | null }
+    run: {
+        run_status: string
+        customer_decision?: string | null
+        compare_presented_at?: string | null
+        recording_mode?: string | null
+        post_record_status?: string | null
+    }
     snapshot: { unresolved_items: string[] } | null
     exceptionRoute: boolean
 }
@@ -102,12 +108,18 @@ function validateFinalizeRequest(
 ): { ok: boolean; status: number; error?: string; items?: string[] } {
     const { run, snapshot, exceptionRoute } = input
 
-    if (run.run_status !== 'draft') {
+    // G-21: allow 'draft' or 'post_record_pending'
+    if (run.run_status !== 'draft' && run.run_status !== 'post_record_pending') {
         return { ok: false, status: 400, error: 'already finalized' }
     }
 
     if (snapshot && snapshot.unresolved_items.length > 0) {
         return { ok: false, status: 422, error: 'unresolved_items', items: snapshot.unresolved_items }
+    }
+
+    // G-21: post_record requires phase2_done before finalize (exception routes bypass)
+    if (!exceptionRoute && run.recording_mode === 'post_record' && run.post_record_status !== 'phase2_done') {
+        return { ok: false, status: 422, error: '事後記録のフェーズ2が完了していません' }
     }
 
     if (!exceptionRoute && !run.compare_presented_at) {
@@ -731,5 +743,239 @@ describe('i18n — dictionary completeness', () => {
             expect(t('ja', key).length).toBeGreaterThan(0)
             expect(t('en', key).length).toBeGreaterThan(0)
         })
+    })
+
+    it('M3: all 7 new audit event labels defined in both locales', () => {
+        const keys = [
+            'eventDeliveryRecorded',
+            'eventRedundancyResolutionRecorded',
+            'eventRecordingModeSelected',
+            'eventPostRecordPhase1Completed',
+            'eventPostRecordPhase2Completed',
+            'eventAgentInputModeActivated',
+            'eventExclusionReasonCoded',
+        ] as const
+        keys.forEach(key => {
+            expect(t('ja', key).length).toBeGreaterThan(0)
+            expect(t('en', key).length).toBeGreaterThan(0)
+        })
+    })
+
+    it('M3: run_status labels for suspended and post_record_pending defined in both locales', () => {
+        expect(t('ja', 'suspended')).toBe('保留中')
+        expect(t('ja', 'post_record_pending')).toBe('事後記録待ち')
+        expect(t('en', 'suspended')).toBe('On Hold')
+        expect(t('en', 'post_record_pending')).toBe('Post-Record Pending')
+    })
+})
+
+// ═══════════════════════════════════════════════════════════════════════════════
+// M3 TC27–TC37  Pure-logic invariant tests
+// ═══════════════════════════════════════════════════════════════════════════════
+
+// ── G-4 helpers (mirror handleExcludeCandidate validation) ────────────────────
+function validateExclusion(code: string, memo: string): { ok: boolean; error?: string } {
+    if (code === 'R-999' && !memo.trim()) {
+        return { ok: false, error: 'R-999選択時はメモ入力が必須です' }
+    }
+    return { ok: true }
+}
+
+// ── G-20/G-21 helpers ─────────────────────────────────────────────────────────
+function buildRecordingModeEvents(recordingMode: string, inputDevice: string): string[] {
+    const events = ['recording_mode_selected']
+    if (inputDevice === 'agent_smartphone') events.push('agent_input_mode_activated')
+    return events
+}
+
+function resolveConsentLabel(inputDevice: string, locale: 'ja' | 'en'): string {
+    if (inputDevice === 'agent_smartphone') {
+        return locale === 'ja'
+            ? '比較結果を説明しました（募集人代行確認）'
+            : 'Comparison result explained (agent proxy confirmation)'
+    }
+    return locale === 'ja' ? '比較結果説明への同意' : 'Consent — Comparison Result'
+}
+
+describe('M3 TC27–TC28: G-4 候補除外理由コード', () => {
+    it('TC27: R-001 without memo passes validation', () => {
+        const result = validateExclusion('R-001', '')
+        expect(result.ok).toBe(true)
+    })
+
+    it('TC27: R-001 with memo also passes', () => {
+        const result = validateExclusion('R-001', '予算超過のため')
+        expect(result.ok).toBe(true)
+    })
+
+    it('TC28: R-999 without memo fails with required error', () => {
+        const result = validateExclusion('R-999', '')
+        expect(result.ok).toBe(false)
+        expect(result.error).toBe('R-999選択時はメモ入力が必須です')
+    })
+
+    it('TC28: R-999 with whitespace-only memo fails validation', () => {
+        const result = validateExclusion('R-999', '   ')
+        expect(result.ok).toBe(false)
+    })
+
+    it('TC28: R-999 with actual memo passes', () => {
+        const result = validateExclusion('R-999', 'その他理由を記載')
+        expect(result.ok).toBe(true)
+    })
+
+    it('all valid R-codes (R-001 to R-005) pass without memo', () => {
+        const codes = ['R-001', 'R-002', 'R-003', 'R-004', 'R-005']
+        codes.forEach(code => {
+            expect(validateExclusion(code, '').ok).toBe(true)
+        })
+    })
+})
+
+describe('M3 TC31/TC35/TC36: G-20/G-23 記録方式・デバイス選択イベント', () => {
+    it('TC31: realtime + tablet_pc fires only recording_mode_selected', () => {
+        const events = buildRecordingModeEvents('realtime', 'tablet_pc')
+        expect(events).toContain('recording_mode_selected')
+        expect(events).not.toContain('agent_input_mode_activated')
+    })
+
+    it('TC35: realtime + tablet_pc does not fire agent_input_mode_activated', () => {
+        const events = buildRecordingModeEvents('realtime', 'tablet_pc')
+        expect(events).toHaveLength(1)
+        expect(events[0]).toBe('recording_mode_selected')
+    })
+
+    it('TC36: realtime + agent_smartphone fires both events', () => {
+        const events = buildRecordingModeEvents('realtime', 'agent_smartphone')
+        expect(events).toContain('recording_mode_selected')
+        expect(events).toContain('agent_input_mode_activated')
+    })
+
+    it('post_record + tablet_pc fires only recording_mode_selected', () => {
+        const events = buildRecordingModeEvents('post_record', 'tablet_pc')
+        expect(events).toHaveLength(1)
+    })
+
+    it('post_record + agent_smartphone fires agent_input_mode_activated', () => {
+        const events = buildRecordingModeEvents('post_record', 'agent_smartphone')
+        expect(events).toContain('agent_input_mode_activated')
+    })
+
+    it('TC36: agent_smartphone switches consent label to proxy wording (ja)', () => {
+        expect(resolveConsentLabel('agent_smartphone', 'ja')).toContain('募集人代行確認')
+    })
+
+    it('TC36: tablet_pc keeps standard consent label (ja)', () => {
+        expect(resolveConsentLabel('tablet_pc', 'ja')).toBe('比較結果説明への同意')
+    })
+
+    it('TC36: agent_smartphone switches consent label (en)', () => {
+        expect(resolveConsentLabel('agent_smartphone', 'en')).toContain('agent proxy')
+    })
+})
+
+describe('M3 TC32–TC34: G-21 事後記録フェーズ finalize validation', () => {
+    it('TC32: post_record_pending status is accepted by finalize gate', () => {
+        const result = validateFinalizeRequest({
+            run: {
+                run_status: 'post_record_pending',
+                recording_mode: 'post_record',
+                post_record_status: 'phase2_done',
+                compare_presented_at: '2026-04-23T10:00:00Z',
+            },
+            snapshot: { unresolved_items: [] },
+            exceptionRoute: false,
+        })
+        expect(result.ok).toBe(true)
+    })
+
+    it('TC33: finalize succeeds when post_record_status=phase2_done', () => {
+        const result = validateFinalizeRequest({
+            run: {
+                run_status: 'post_record_pending',
+                recording_mode: 'post_record',
+                post_record_status: 'phase2_done',
+                compare_presented_at: '2026-04-23T10:00:00Z',
+            },
+            snapshot: { unresolved_items: [] },
+            exceptionRoute: false,
+        })
+        expect(result.ok).toBe(true)
+        expect(result.status).toBe(200)
+    })
+
+    it('TC34: finalize fails 422 when post_record and phase2 not done', () => {
+        const result = validateFinalizeRequest({
+            run: {
+                run_status: 'post_record_pending',
+                recording_mode: 'post_record',
+                post_record_status: 'phase1_done',
+                compare_presented_at: '2026-04-23T10:00:00Z',
+            },
+            snapshot: { unresolved_items: [] },
+            exceptionRoute: false,
+        })
+        expect(result.ok).toBe(false)
+        expect(result.status).toBe(422)
+        expect(result.error).toContain('フェーズ2')
+    })
+
+    it('TC34: finalize fails when post_record_status is null', () => {
+        const result = validateFinalizeRequest({
+            run: {
+                run_status: 'post_record_pending',
+                recording_mode: 'post_record',
+                post_record_status: null,
+                compare_presented_at: '2026-04-23T10:00:00Z',
+            },
+            snapshot: { unresolved_items: [] },
+            exceptionRoute: false,
+        })
+        expect(result.ok).toBe(false)
+        expect(result.status).toBe(422)
+    })
+
+    it('exception route bypasses post_record phase2 check', () => {
+        const result = validateFinalizeRequest({
+            run: {
+                run_status: 'draft',
+                recording_mode: 'post_record',
+                post_record_status: null,
+                compare_presented_at: null,
+            },
+            snapshot: { unresolved_items: [] },
+            exceptionRoute: true,
+        })
+        expect(result.ok).toBe(true)
+    })
+
+    it('realtime mode ignores post_record phase check', () => {
+        const result = validateFinalizeRequest({
+            run: {
+                run_status: 'draft',
+                recording_mode: 'realtime',
+                post_record_status: null,
+                compare_presented_at: '2026-04-23T10:00:00Z',
+            },
+            snapshot: { unresolved_items: [] },
+            exceptionRoute: false,
+        })
+        expect(result.ok).toBe(true)
+    })
+
+    it('finalized status is rejected (400) regardless of recording_mode', () => {
+        const result = validateFinalizeRequest({
+            run: {
+                run_status: 'finalized',
+                recording_mode: 'post_record',
+                post_record_status: 'phase2_done',
+                compare_presented_at: '2026-04-23T10:00:00Z',
+            },
+            snapshot: { unresolved_items: [] },
+            exceptionRoute: false,
+        })
+        expect(result.ok).toBe(false)
+        expect(result.status).toBe(400)
+        expect(result.error).toBe('already finalized')
     })
 })

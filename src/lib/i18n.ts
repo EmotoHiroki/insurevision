@@ -22,6 +22,8 @@ const dict = {
         draft: '作成中',
         finalized: '確定済（編集不可）',
         archived: 'アーカイブ',
+        suspended: '保留中',
+        post_record_pending: '事後記録待ち',
 
         // ── Customer / run basics ─────────────────
         customerType: '顧客区分',
@@ -132,7 +134,7 @@ const dict = {
         finalizeSuccess: '案件を確定しました',
         finalizeFailed: '確定処理に失敗しました',
 
-        // ── Audit event type labels (11 values) ───
+        // ── Audit event type labels (18 values) ───
         eventIssueShared: '課題共有',
         eventManualReviewCompleted: '手動確認完了',
         eventInsurerListPresented: '保険会社リスト提示',
@@ -144,6 +146,13 @@ const dict = {
         eventConsentPersonalInfo: '個人情報同意',
         eventConsentComparisonResult: '比較結果同意',
         eventRunFinalized: '案件確定',
+        eventDeliveryRecorded: '交付記録',
+        eventRedundancyResolutionRecorded: '重複補償判定記録',
+        eventRecordingModeSelected: '記録方式選択',
+        eventPostRecordPhase1Completed: '事後記録フェーズ1完了',
+        eventPostRecordPhase2Completed: '事後記録フェーズ2完了',
+        eventAgentInputModeActivated: '募集人入力モード起動',
+        eventExclusionReasonCoded: '除外理由コード記録',
 
         // ── Overview / detail fields ──────────────
         basicInfo: '基本情報',
@@ -203,6 +212,8 @@ const dict = {
         draft: 'Draft',
         finalized: 'Confirmed (Read-only)',
         archived: 'Archived',
+        suspended: 'On Hold',
+        post_record_pending: 'Post-Record Pending',
 
         // ── Customer / run basics ─────────────────
         customerType: 'Customer Type',
@@ -313,7 +324,7 @@ const dict = {
         finalizeSuccess: 'Case finalized successfully',
         finalizeFailed: 'Finalization failed',
 
-        // ── Audit event type labels ───────────────
+        // ── Audit event type labels (18 values) ───
         eventIssueShared: 'Issue Shared',
         eventManualReviewCompleted: 'Manual Review Completed',
         eventInsurerListPresented: 'Insurer List Presented',
@@ -325,6 +336,13 @@ const dict = {
         eventConsentPersonalInfo: 'Consent: Personal Info',
         eventConsentComparisonResult: 'Consent: Comparison Result',
         eventRunFinalized: 'Case Finalized',
+        eventDeliveryRecorded: 'Delivery Recorded',
+        eventRedundancyResolutionRecorded: 'Redundancy Resolution Recorded',
+        eventRecordingModeSelected: 'Recording Mode Selected',
+        eventPostRecordPhase1Completed: 'Post-Record Phase 1 Completed',
+        eventPostRecordPhase2Completed: 'Post-Record Phase 2 Completed',
+        eventAgentInputModeActivated: 'Agent Input Mode Activated',
+        eventExclusionReasonCoded: 'Exclusion Reason Coded',
 
         // ── Overview / detail ─────────────────────
         basicInfo: 'Basic Info',
