@@ -134,7 +134,7 @@ const dict = {
         finalizeSuccess: '案件を確定しました',
         finalizeFailed: '確定処理に失敗しました',
 
-        // ── Audit event type labels (18 values) ───
+        // ── Audit event type labels (18 M1-M3 + 6 Phase2-a) ──
         eventIssueShared: '課題共有',
         eventManualReviewCompleted: '手動確認完了',
         eventInsurerListPresented: '保険会社リスト提示',
@@ -153,6 +153,76 @@ const dict = {
         eventPostRecordPhase2Completed: '事後記録フェーズ2完了',
         eventAgentInputModeActivated: '募集人入力モード起動',
         eventExclusionReasonCoded: '除外理由コード記録',
+        // Phase2-a (+6)
+        eventMeetingSceneSelected: '面談シーン選択',
+        eventElectronicConsentRecorded: '電子的方法による提供への同意確認',
+        eventRecruiterSmartphoneConfirmed: '募集人スマホ確認完了',
+        eventCustomerSmartphoneConfirmed: 'お客様スマホ確認完了',
+        eventPaperConfirmationCompleted: '紙面確認完了',
+        eventImportantMattersDeliveryConfirmed: '重要事項説明書交付確認',
+
+        // ── G-28: 面談シーンプリセット ────────────
+        meetingScene: '面談シーン',
+        meetingSceneVisitSmartphone: '訪問・スマホ連携',
+        meetingSceneVisitPaper: '訪問・ペーパー確認',
+        meetingScenePcTablet: 'PC・タブレット型',
+        meetingSceneTelephone: '電話募集型',
+        meetingSceneWebMeeting: 'WEB面談',
+
+        // ── G-27: 電子的方法による提供への同意確認 ─
+        electronicConsent: '電子的方法による提供への同意',
+        electronicConsentStatus: '同意確認状態',
+        electronicConsentAgreed: '同意あり',
+        electronicConsentDeclined: '同意なし（紙面確認へ）',
+        electronicConsentFaceConfirmed: '面談時確認',
+        electronicConsentNotRecorded: '未記録',
+        electronicConsentMethod: '同意確認方法',
+        electronicConsentMethodEmail: 'メール送付',
+        electronicConsentMethodUrl: 'URL共有',
+        electronicConsentMethodQr: 'QRコード',
+        electronicConsentMethodFace: '対面確認',
+
+        // ── スマホ確認導線 ─────────────────────────
+        smartphoneConfirmation: 'スマホ確認',
+        smartphoneConfStatus: 'スマホ確認状態',
+        smartphoneConfNotRequired: '対象外',
+        smartphoneConfPending: '確認待ち',
+        smartphoneConfRecruiterDone: '募集人確認完了',
+        smartphoneConfCustomerDone: 'お客様確認完了',
+        smartphoneConfPaperFallback: '紙面確認に切替',
+        recruiterSmartphoneConfirm: '募集人スマホで確認',
+        customerSmartphoneConfirm: 'お客様スマホで確認',
+
+        // ── 紙面確認 ──────────────────────────────
+        paperConfirmation: '紙面確認',
+        paperConfirmationStatus: '紙面確認状態',
+        paperConfirmationNotRequired: '対象外',
+        paperConfirmationPending: '紙面確認待ち',
+        paperConfirmationCompleted: '紙面確認完了',
+        recruiterInputMode: '募集人入力モード',
+
+        // ── 重要事項説明書交付確認 ────────────────
+        importantMattersDelivery: '重要事項説明書交付',
+        importantMattersDelivered: '交付確認済',
+        importantMattersNotDelivered: '未交付',
+        importantMattersDeliveryMethodElectronic: '電子交付',
+        importantMattersDeliveryMethodPaper: '書面交付',
+        importantMattersDeliveryGate: '重要事項説明書の交付確認が完了していません',
+
+        // ── CSV取込 ───────────────────────────────
+        csvImport: 'CSV取込',
+        csvImportSession: 'CSV取込セッション',
+        csvImportFilename: 'ファイル名',
+        csvImportRowCount: '行数',
+        csvImportMappedFields: 'マッピング済み項目',
+        csvImportUnmappedFields: '未マッピング項目',
+        csvImportPriorContract: '前回契約データ',
+        csvImportNewContract: '今回契約データ',
+        csvImportStatusPending: '開始前',
+        csvImportStatusPreviewing: 'プレビュー中',
+        csvImportStatusConfirmed: '取込確定',
+        csvImportStatusCancelled: 'キャンセル',
+        csvImportStatusError: 'エラー',
 
         // ── Overview / detail fields ──────────────
         basicInfo: '基本情報',
@@ -324,7 +394,7 @@ const dict = {
         finalizeSuccess: 'Case finalized successfully',
         finalizeFailed: 'Finalization failed',
 
-        // ── Audit event type labels (18 values) ───
+        // ── Audit event type labels (18 M1-M3 + 6 Phase2-a) ──
         eventIssueShared: 'Issue Shared',
         eventManualReviewCompleted: 'Manual Review Completed',
         eventInsurerListPresented: 'Insurer List Presented',
@@ -343,6 +413,76 @@ const dict = {
         eventPostRecordPhase2Completed: 'Post-Record Phase 2 Completed',
         eventAgentInputModeActivated: 'Agent Input Mode Activated',
         eventExclusionReasonCoded: 'Exclusion Reason Coded',
+        // Phase2-a (+6)
+        eventMeetingSceneSelected: 'Meeting Scene Selected',
+        eventElectronicConsentRecorded: 'Electronic Consent Recorded',
+        eventRecruiterSmartphoneConfirmed: 'Recruiter Smartphone Confirmed',
+        eventCustomerSmartphoneConfirmed: 'Customer Smartphone Confirmed',
+        eventPaperConfirmationCompleted: 'Paper Confirmation Completed',
+        eventImportantMattersDeliveryConfirmed: 'Important Matters Delivery Confirmed',
+
+        // ── G-28: Meeting Scene Preset ────────────
+        meetingScene: 'Interview Scene',
+        meetingSceneVisitSmartphone: 'Visit + Smartphone',
+        meetingSceneVisitPaper: 'Visit + Paper',
+        meetingScenePcTablet: 'PC / Tablet',
+        meetingSceneTelephone: 'Telephone',
+        meetingSceneWebMeeting: 'Web Meeting',
+
+        // ── G-27: Electronic Consent ──────────────
+        electronicConsent: 'Consent to Electronic Delivery',
+        electronicConsentStatus: 'Consent Status',
+        electronicConsentAgreed: 'Agreed',
+        electronicConsentDeclined: 'Declined (Paper mode)',
+        electronicConsentFaceConfirmed: 'Face-to-face Confirmed',
+        electronicConsentNotRecorded: 'Not Recorded',
+        electronicConsentMethod: 'Consent Method',
+        electronicConsentMethodEmail: 'Email',
+        electronicConsentMethodUrl: 'URL Share',
+        electronicConsentMethodQr: 'QR Code',
+        electronicConsentMethodFace: 'Face to Face',
+
+        // ── Smartphone Confirmation ───────────────
+        smartphoneConfirmation: 'Smartphone Confirmation',
+        smartphoneConfStatus: 'Smartphone Confirmation Status',
+        smartphoneConfNotRequired: 'Not Required',
+        smartphoneConfPending: 'Pending',
+        smartphoneConfRecruiterDone: 'Recruiter Confirmed',
+        smartphoneConfCustomerDone: 'Customer Confirmed',
+        smartphoneConfPaperFallback: 'Switched to Paper',
+        recruiterSmartphoneConfirm: 'Confirm on Recruiter Phone',
+        customerSmartphoneConfirm: 'Confirm on Customer Phone',
+
+        // ── Paper Confirmation ────────────────────
+        paperConfirmation: 'Paper Confirmation',
+        paperConfirmationStatus: 'Paper Confirmation Status',
+        paperConfirmationNotRequired: 'Not Required',
+        paperConfirmationPending: 'Pending',
+        paperConfirmationCompleted: 'Completed',
+        recruiterInputMode: 'Recruiter Input Mode',
+
+        // ── Important Matters Delivery ────────────
+        importantMattersDelivery: 'Important Matters Delivery',
+        importantMattersDelivered: 'Delivery Confirmed',
+        importantMattersNotDelivered: 'Not Delivered',
+        importantMattersDeliveryMethodElectronic: 'Electronic Delivery',
+        importantMattersDeliveryMethodPaper: 'Paper Delivery',
+        importantMattersDeliveryGate: 'Important matters delivery not yet confirmed',
+
+        // ── CSV Import ────────────────────────────
+        csvImport: 'CSV Import',
+        csvImportSession: 'CSV Import Session',
+        csvImportFilename: 'Filename',
+        csvImportRowCount: 'Row Count',
+        csvImportMappedFields: 'Mapped Fields',
+        csvImportUnmappedFields: 'Unmapped Fields',
+        csvImportPriorContract: 'Prior Contract Data',
+        csvImportNewContract: 'New Contract Data',
+        csvImportStatusPending: 'Pending',
+        csvImportStatusPreviewing: 'Previewing',
+        csvImportStatusConfirmed: 'Confirmed',
+        csvImportStatusCancelled: 'Cancelled',
+        csvImportStatusError: 'Error',
 
         // ── Overview / detail ─────────────────────
         basicInfo: 'Basic Info',

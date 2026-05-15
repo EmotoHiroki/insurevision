@@ -1,5 +1,5 @@
 // =============================================
-// Database Types — M3 v1.0
+// Database Types — Phase2-a v1.0
 // =============================================
 
 export type RunStatus = 'draft' | 'finalized' | 'archived' | 'suspended' | 'post_record_pending'
@@ -33,6 +33,52 @@ export type CustomerDecision =
     | 'information_refused'
     | 'comparison_waived'
 
+// Phase2-a: G-28 面談シーンプリセット（5種）
+export type MeetingScene =
+    | 'visit_smartphone'  // 訪問・スマホ連携
+    | 'visit_paper'       // 訪問・ペーパー確認
+    | 'pc_tablet'         // PC・タブレット型
+    | 'telephone'         // 電話募集型
+    | 'web_meeting'       // WEB面談
+
+// Phase2-a: G-27 電子的方法による提供への同意確認
+export type ElectronicConsentStatus =
+    | 'agreed'         // 同意あり
+    | 'declined'       // 同意なし → 紙面確認へ
+    | 'face_confirmed' // 面談時確認
+    | 'not_recorded'   // 未記録
+
+export type ElectronicConsentMethod =
+    | 'email'
+    | 'url_share'
+    | 'qr_code'
+    | 'face_to_face'
+
+// Phase2-a: スマホ確認ステータス
+export type SmartphoneConfStatus =
+    | 'not_required'
+    | 'pending'
+    | 'recruiter_confirmed'
+    | 'customer_confirmed'
+    | 'paper_fallback'
+
+// Phase2-a: 紙面確認ステータス
+export type PaperConfirmationStatus =
+    | 'not_required'
+    | 'pending'
+    | 'completed'
+
+// Phase2-a: 重要事項説明書交付方法
+export type ImportantMattersDeliveryMethod = 'electronic' | 'paper'
+
+// Phase2-a: CSV取込セッションステータス
+export type CsvImportSessionStatus =
+    | 'pending'
+    | 'previewing'
+    | 'confirmed'
+    | 'cancelled'
+    | 'error'
+
 export type AuditEventType =
     | 'issue_shared'
     | 'manual_review_completed'
@@ -52,6 +98,12 @@ export type AuditEventType =
     | 'post_record_phase2_completed'    // M3: 事後記録フェーズ2完了
     | 'agent_input_mode_activated'      // M3: 募集人入力モード起動
     | 'exclusion_reason_coded'          // M3: 候補除外理由コード選択
+    | 'meeting_scene_selected'          // Phase2-a: G-28 面談シーン選択
+    | 'electronic_consent_recorded'     // Phase2-a: G-27 電子同意確認記録
+    | 'recruiter_smartphone_confirmed'  // Phase2-a: 募集人スマホ確認完了
+    | 'customer_smartphone_confirmed'   // Phase2-a: お客様スマホ確認完了
+    | 'paper_confirmation_completed'    // Phase2-a: 紙面確認完了
+    | 'important_matters_delivery_confirmed' // Phase2-a: 重要事項説明書交付確認
 
 // =============================================
 // Table Interfaces
@@ -125,6 +177,26 @@ export interface Run {
     pending_note: string | null
     suspended_at: string | null
     suspension_type: SuspensionType | null
+    // Phase2-a: G-28 面談シーンプリセット
+    meeting_scene: MeetingScene | null
+    // Phase2-a: G-27 電子的方法による提供への同意確認
+    electronic_consent_status: ElectronicConsentStatus | null
+    electronic_consent_method: ElectronicConsentMethod | null
+    electronic_consent_confirmed_at: string | null
+    electronic_consent_operator_id: string | null
+    // Phase2-a: スマホ確認導線
+    smartphone_conf_status: SmartphoneConfStatus
+    recruiter_smartphone_confirmed_at: string | null
+    customer_smartphone_confirmed_at: string | null
+    // Phase2-a: 紙面確認
+    paper_confirmation_status: PaperConfirmationStatus
+    paper_confirmation_completed_at: string | null
+    // Phase2-a: 重要事項説明書交付確認
+    important_matters_delivered: boolean
+    important_matters_delivered_at: string | null
+    important_matters_delivery_method: ImportantMattersDeliveryMethod | null
+    // Phase2-a: canNext制御
+    can_next_blocked_reasons: string[]
     // Meta
     core_logic_version: string
     is_test: boolean
@@ -225,6 +297,73 @@ export interface MinimalProofPdfStub {
     consent_important_matters?: boolean
     consent_personal_info?: boolean
     consent_comparison_result?: boolean
+}
+
+// Phase2-a: CSV Import Session Skeleton
+export interface CsvImportSession {
+    id: string
+    run_id: string | null
+    session_status: CsvImportSessionStatus
+    filename: string | null
+    row_count: number | null
+    mapped_fields: Record<string, string>        // { csv_column: run_field }
+    unmapped_fields: string[]
+    manual_override_fields: string[]
+    prior_contract_fields: Record<string, unknown>  // 前回契約データ
+    new_contract_fields: Record<string, unknown>    // 今回契約データ
+    error_detail: string | null
+    created_at: string
+    created_by: string | null
+}
+
+export type CsvImportSessionInsert = Omit<CsvImportSession, 'id' | 'created_at'>
+
+// Phase2-a: Meeting scene → derived confirmation config
+export interface MeetingSceneConfig {
+    scene: MeetingScene
+    smartphoneUsed: boolean           // スマホ確認導線を使うか
+    recruiterInputMode: boolean       // 募集人入力モード（紙面確認時）
+    electronicConsentRequired: boolean // 電子同意確認が必要か
+    paperFallbackAllowed: boolean     // 紙面へのフォールバックを許可するか
+}
+
+// Derived config per scene (used in MS2 branching logic)
+export const MEETING_SCENE_CONFIG: Record<MeetingScene, MeetingSceneConfig> = {
+    visit_smartphone: {
+        scene: 'visit_smartphone',
+        smartphoneUsed: true,
+        recruiterInputMode: false,
+        electronicConsentRequired: true,
+        paperFallbackAllowed: true,
+    },
+    visit_paper: {
+        scene: 'visit_paper',
+        smartphoneUsed: false,
+        recruiterInputMode: true,
+        electronicConsentRequired: false,
+        paperFallbackAllowed: false,
+    },
+    pc_tablet: {
+        scene: 'pc_tablet',
+        smartphoneUsed: false,
+        recruiterInputMode: false,
+        electronicConsentRequired: true,
+        paperFallbackAllowed: true,
+    },
+    telephone: {
+        scene: 'telephone',
+        smartphoneUsed: false,
+        recruiterInputMode: true,
+        electronicConsentRequired: false,
+        paperFallbackAllowed: false,
+    },
+    web_meeting: {
+        scene: 'web_meeting',
+        smartphoneUsed: false,
+        recruiterInputMode: false,
+        electronicConsentRequired: true,
+        paperFallbackAllowed: true,
+    },
 }
 
 // =============================================
