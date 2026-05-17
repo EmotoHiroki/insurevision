@@ -124,6 +124,14 @@ export default function RunDetailPage() {
     // G-21: post-record phase completion state
     const [completingPhase1, setCompletingPhase1] = useState(false)
     const [completingPhase2, setCompletingPhase2] = useState(false)
+    // Phase2-a state
+    const [savingConsent, setSavingConsent] = useState(false)
+    const [savingSmartphone, setSavingSmartphone] = useState(false)
+    const [savingPaper, setSavingPaper] = useState(false)
+    const [savingImportantMatters, setSavingImportantMatters] = useState(false)
+    const [importantMattersMethod, setImportantMattersMethod] = useState<'electronic' | 'paper'>('electronic')
+    const [smartphoneUrl, setSmartphoneUrl] = useState('')
+    const [copied, setCopied] = useState(false)
 
     // ─────────────────────────────────────────────
     const showToast = (msg: string, type: 'success' | 'error' = 'success') => {
@@ -438,6 +446,99 @@ export default function RunDetailPage() {
     }
 
     // ─────────────────────────────────────────────
+    // Phase2-a: G-27 電子同意確認
+    // ─────────────────────────────────────────────
+    const handleRecordConsent = async (status: 'agreed' | 'declined' | 'face_confirmed') => {
+        if (!operator) return
+        setSavingConsent(true)
+        try {
+            const res = await fetch(`/api/run/${runId}/consent`, {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ operatorId: operator.id, status }),
+            })
+            if (!res.ok) throw new Error((await res.json()).error)
+            showToast(locale === 'ja' ? '同意ステータスを記録しました' : 'Consent status recorded')
+            await loadData()
+        } catch (e: unknown) {
+            showToast(e instanceof Error ? e.message : 'Error', 'error')
+        } finally { setSavingConsent(false) }
+    }
+
+    // ─────────────────────────────────────────────
+    // Phase2-a: スマホ確認リンク発行
+    // ─────────────────────────────────────────────
+    const handleGenerateSmartphoneUrl = (role: 'recruiter' | 'customer') => {
+        const base = typeof window !== 'undefined' ? window.location.origin : ''
+        const url = `${base}/run/${runId}/smartphone?role=${role}`
+        setSmartphoneUrl(url)
+    }
+
+    const handleCopyUrl = async () => {
+        if (!smartphoneUrl) return
+        await navigator.clipboard.writeText(smartphoneUrl)
+        setCopied(true)
+        setTimeout(() => setCopied(false), 2000)
+    }
+
+    const handleRecordSmartphone = async (role: 'recruiter' | 'customer') => {
+        if (!operator) return
+        setSavingSmartphone(true)
+        try {
+            const res = await fetch(`/api/run/${runId}/smartphone-confirm`, {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ operatorId: operator.id, role }),
+            })
+            if (!res.ok) throw new Error((await res.json()).error)
+            showToast(locale === 'ja' ? 'スマホ確認を記録しました' : 'Smartphone confirmation recorded')
+            await loadData()
+        } catch (e: unknown) {
+            showToast(e instanceof Error ? e.message : 'Error', 'error')
+        } finally { setSavingSmartphone(false) }
+    }
+
+    // ─────────────────────────────────────────────
+    // Phase2-a: 紙面確認完了
+    // ─────────────────────────────────────────────
+    const handlePaperConfirm = async () => {
+        if (!operator) return
+        setSavingPaper(true)
+        try {
+            const res = await fetch(`/api/run/${runId}/paper-confirm`, {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ operatorId: operator.id }),
+            })
+            if (!res.ok) throw new Error((await res.json()).error)
+            showToast(locale === 'ja' ? '紙面確認を完了しました' : 'Paper confirmation completed')
+            await loadData()
+        } catch (e: unknown) {
+            showToast(e instanceof Error ? e.message : 'Error', 'error')
+        } finally { setSavingPaper(false) }
+    }
+
+    // ─────────────────────────────────────────────
+    // Phase2-a: 重要事項説明書交付確認
+    // ─────────────────────────────────────────────
+    const handleImportantMattersDelivery = async () => {
+        if (!operator) return
+        setSavingImportantMatters(true)
+        try {
+            const res = await fetch(`/api/run/${runId}/important-matters`, {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ operatorId: operator.id, deliveryMethod: importantMattersMethod }),
+            })
+            if (!res.ok) throw new Error((await res.json()).error)
+            showToast(locale === 'ja' ? '重要事項説明書の交付を記録しました' : 'Important matters delivery recorded')
+            await loadData()
+        } catch (e: unknown) {
+            showToast(e instanceof Error ? e.message : 'Error', 'error')
+        } finally { setSavingImportantMatters(false) }
+    }
+
+    // ─────────────────────────────────────────────
     // Finalize
     // ─────────────────────────────────────────────
     const handleFinalize = async () => {
@@ -503,6 +604,13 @@ export default function RunDetailPage() {
             labelEn: 'Insurer list presentation recorded',
             pass: auditEvents.some(e => e.event_type === 'insurer_list_presented'),
         },
+        // Phase2-a: important_matters_delivered gate (only when meeting_scene is set)
+        ...(run.meeting_scene ? [{
+            id: 'important_matters_delivered',
+            labelJa: '重要事項説明書の交付確認が完了している（Phase2-a）',
+            labelEn: 'Important matters delivery confirmed (Phase2-a)',
+            pass: run.important_matters_delivered,
+        }] : []),
     ] : []
 
     const allPreflightPass = preflightChecks.every(c => c.pass)
@@ -734,6 +842,221 @@ export default function RunDetailPage() {
                                     </div>
                                 </div>
                             </div>
+                        )}
+
+                        {/* ─ Phase2-a panels (only when meeting_scene is set) ─ */}
+                        {run.meeting_scene && (
+                            <>
+                                {/* G-28: 面談シーン */}
+                                <div className="section-card" style={{ gridColumn: '1 / -1' }}>
+                                    <h3 style={{ fontSize: 15, fontWeight: 600, marginBottom: 12, color: '#1d4ed8' }}>
+                                        G-28 {locale === 'ja' ? '面談シーン' : 'Meeting Scene'}
+                                    </h3>
+                                    <div style={{ display: 'flex', alignItems: 'center', gap: 12 }}>
+                                        <span style={{ background: '#eff6ff', color: '#1d4ed8', padding: '4px 12px', borderRadius: 20, fontSize: 13, fontWeight: 600 }}>
+                                            {{ visit_smartphone: locale === 'ja' ? '訪問・スマホ連携' : 'Visit + Smartphone',
+                                               visit_paper: locale === 'ja' ? '訪問・ペーパー確認' : 'Visit + Paper',
+                                               pc_tablet: locale === 'ja' ? 'PC・タブレット型' : 'PC/Tablet',
+                                               telephone: locale === 'ja' ? '電話募集型' : 'Telephone',
+                                               web_meeting: locale === 'ja' ? 'WEB面談' : 'Web Meeting' }[run.meeting_scene] ?? run.meeting_scene}
+                                        </span>
+                                    </div>
+                                </div>
+
+                                {/* G-27: 電子的方法による提供への同意確認 */}
+                                {(['visit_smartphone', 'pc_tablet', 'web_meeting'] as const).includes(run.meeting_scene as 'visit_smartphone' | 'pc_tablet' | 'web_meeting') && (
+                                    <div className="section-card" style={{ gridColumn: '1 / -1' }}>
+                                        <h3 style={{ fontSize: 15, fontWeight: 600, marginBottom: 12, color: '#1d4ed8' }}>
+                                            G-27 {locale === 'ja' ? '電子的方法による提供への同意確認' : 'Electronic Delivery Consent'}
+                                        </h3>
+                                        <div style={{ marginBottom: 12 }}>
+                                            <span style={{ fontSize: 13, color: '#6b7280' }}>
+                                                {locale === 'ja' ? '現在のステータス: ' : 'Current status: '}
+                                            </span>
+                                            <span style={{ fontWeight: 600, fontSize: 13, color: run.electronic_consent_status === 'agreed' ? '#16a34a' : run.electronic_consent_status === 'declined' ? '#dc2626' : '#92400e' }}>
+                                                {{ agreed: locale === 'ja' ? '同意あり' : 'Agreed',
+                                                   declined: locale === 'ja' ? '同意なし（紙面確認へ）' : 'Declined (paper mode)',
+                                                   face_confirmed: locale === 'ja' ? '面談時確認済み' : 'Face confirmed',
+                                                   not_recorded: locale === 'ja' ? '未記録' : 'Not recorded' }[run.electronic_consent_status ?? 'not_recorded'] ?? (locale === 'ja' ? '未記録' : 'Not recorded')}
+                                            </span>
+                                        </div>
+                                        {isEditable && !run.electronic_consent_status && (
+                                            <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap' }}>
+                                                <button
+                                                    onClick={() => handleRecordConsent('agreed')}
+                                                    disabled={savingConsent}
+                                                    style={{ padding: '8px 16px', background: '#16a34a', color: 'white', border: 'none', borderRadius: 6, fontSize: 13, cursor: 'pointer', fontWeight: 600 }}
+                                                >
+                                                    {locale === 'ja' ? '同意あり' : 'Agreed'}
+                                                </button>
+                                                <button
+                                                    onClick={() => handleRecordConsent('declined')}
+                                                    disabled={savingConsent}
+                                                    style={{ padding: '8px 16px', background: '#dc2626', color: 'white', border: 'none', borderRadius: 6, fontSize: 13, cursor: 'pointer', fontWeight: 600 }}
+                                                >
+                                                    {locale === 'ja' ? '同意なし（紙面確認へ）' : 'Declined (→ Paper)'}
+                                                </button>
+                                                <button
+                                                    onClick={() => handleRecordConsent('face_confirmed')}
+                                                    disabled={savingConsent}
+                                                    style={{ padding: '8px 16px', background: '#d97706', color: 'white', border: 'none', borderRadius: 6, fontSize: 13, cursor: 'pointer', fontWeight: 600 }}
+                                                >
+                                                    {locale === 'ja' ? '面談時確認' : 'Face Confirmed'}
+                                                </button>
+                                            </div>
+                                        )}
+                                        {run.electronic_consent_confirmed_at && (
+                                            <p style={{ fontSize: 12, color: '#6b7280', marginTop: 8 }}>
+                                                {locale === 'ja' ? '記録日時: ' : 'Recorded: '}
+                                                {new Date(run.electronic_consent_confirmed_at).toLocaleString()}
+                                            </p>
+                                        )}
+                                    </div>
+                                )}
+
+                                {/* スマホ確認導線 (visit_smartphone のみ) */}
+                                {run.meeting_scene === 'visit_smartphone' && run.electronic_consent_status !== 'declined' && (
+                                    <div className="section-card" style={{ gridColumn: '1 / -1' }}>
+                                        <h3 style={{ fontSize: 15, fontWeight: 600, marginBottom: 12, color: '#1d4ed8' }}>
+                                            {locale === 'ja' ? 'スマホ確認導線' : 'Smartphone Confirmation'}
+                                        </h3>
+                                        <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 12 }}>
+                                            <div style={{ background: run.recruiter_smartphone_confirmed_at ? '#f0fdf4' : '#f9fafb', borderRadius: 8, padding: 14, border: '1px solid #e5e7eb' }}>
+                                                <p style={{ fontWeight: 600, fontSize: 13, marginBottom: 6 }}>
+                                                    {locale === 'ja' ? '① 募集人確認' : '① Recruiter Confirm'}
+                                                </p>
+                                                {run.recruiter_smartphone_confirmed_at ? (
+                                                    <p style={{ color: '#16a34a', fontSize: 12 }}>✓ {new Date(run.recruiter_smartphone_confirmed_at).toLocaleString()}</p>
+                                                ) : (
+                                                    isEditable && (
+                                                        <div style={{ display: 'flex', flexDirection: 'column', gap: 6 }}>
+                                                            <button onClick={() => handleGenerateSmartphoneUrl('recruiter')}
+                                                                style={{ padding: '6px 12px', background: '#eff6ff', color: '#1d4ed8', border: '1px solid #bfdbfe', borderRadius: 6, fontSize: 12, cursor: 'pointer' }}>
+                                                                {locale === 'ja' ? 'リンク発行' : 'Generate Link'}
+                                                            </button>
+                                                            <button onClick={() => handleRecordSmartphone('recruiter')} disabled={savingSmartphone}
+                                                                style={{ padding: '6px 12px', background: '#1d4ed8', color: 'white', border: 'none', borderRadius: 6, fontSize: 12, cursor: 'pointer' }}>
+                                                                {locale === 'ja' ? '確認済みとして記録' : 'Mark Confirmed'}
+                                                            </button>
+                                                        </div>
+                                                    )
+                                                )}
+                                            </div>
+                                            <div style={{ background: run.customer_smartphone_confirmed_at ? '#f0fdf4' : '#f9fafb', borderRadius: 8, padding: 14, border: '1px solid #e5e7eb' }}>
+                                                <p style={{ fontWeight: 600, fontSize: 13, marginBottom: 6 }}>
+                                                    {locale === 'ja' ? '② お客様確認' : '② Customer Confirm'}
+                                                </p>
+                                                {run.customer_smartphone_confirmed_at ? (
+                                                    <p style={{ color: '#16a34a', fontSize: 12 }}>✓ {new Date(run.customer_smartphone_confirmed_at).toLocaleString()}</p>
+                                                ) : (
+                                                    isEditable && (
+                                                        <div style={{ display: 'flex', flexDirection: 'column', gap: 6 }}>
+                                                            <button onClick={() => handleGenerateSmartphoneUrl('customer')}
+                                                                style={{ padding: '6px 12px', background: '#eff6ff', color: '#1d4ed8', border: '1px solid #bfdbfe', borderRadius: 6, fontSize: 12, cursor: 'pointer' }}>
+                                                                {locale === 'ja' ? 'リンク発行' : 'Generate Link'}
+                                                            </button>
+                                                            <button onClick={() => handleRecordSmartphone('customer')} disabled={savingSmartphone}
+                                                                style={{ padding: '6px 12px', background: '#1d4ed8', color: 'white', border: 'none', borderRadius: 6, fontSize: 12, cursor: 'pointer' }}>
+                                                                {locale === 'ja' ? '確認済みとして記録' : 'Mark Confirmed'}
+                                                            </button>
+                                                        </div>
+                                                    )
+                                                )}
+                                            </div>
+                                        </div>
+                                        {smartphoneUrl && (
+                                            <div style={{ marginTop: 12, background: '#f9fafb', borderRadius: 8, padding: 12, border: '1px solid #e5e7eb' }}>
+                                                <p style={{ fontSize: 11, color: '#6b7280', marginBottom: 6 }}>
+                                                    {locale === 'ja' ? '確認URL（コピーしてお客様/募集人のスマホに送信）:' : 'Confirmation URL (copy and send to smartphone):'}
+                                                </p>
+                                                <div style={{ display: 'flex', gap: 8, alignItems: 'center' }}>
+                                                    <code style={{ flex: 1, fontSize: 11, wordBreak: 'break-all', color: '#1d4ed8' }}>{smartphoneUrl}</code>
+                                                    <button onClick={handleCopyUrl}
+                                                        style={{ padding: '4px 10px', background: copied ? '#16a34a' : '#e5e7eb', color: copied ? 'white' : '#374151', border: 'none', borderRadius: 4, fontSize: 11, cursor: 'pointer', whiteSpace: 'nowrap' }}>
+                                                        {copied ? (locale === 'ja' ? 'コピー済' : 'Copied!') : (locale === 'ja' ? 'コピー' : 'Copy')}
+                                                    </button>
+                                                </div>
+                                            </div>
+                                        )}
+                                    </div>
+                                )}
+
+                                {/* 紙面確認モード (declined or visit_paper / telephone) */}
+                                {(run.paper_confirmation_status === 'pending' ||
+                                  run.meeting_scene === 'visit_paper' ||
+                                  run.meeting_scene === 'telephone') && (
+                                    <div className="section-card" style={{ gridColumn: '1 / -1', borderColor: run.paper_confirmation_status === 'completed' ? '#86efac' : '#fbbf24', background: run.paper_confirmation_status === 'completed' ? '#f0fdf4' : '#fffbeb' }}>
+                                        <h3 style={{ fontSize: 15, fontWeight: 600, marginBottom: 8, color: run.paper_confirmation_status === 'completed' ? '#15803d' : '#92400e' }}>
+                                            {locale === 'ja' ? '紙面確認モード' : 'Paper Confirmation Mode'}
+                                        </h3>
+                                        <p style={{ fontSize: 13, color: '#78716c', marginBottom: 10 }}>
+                                            {locale === 'ja'
+                                                ? '募集人が紙面で内容を確認・記入します。'
+                                                : 'Recruiter confirms and fills in on paper.'}
+                                        </p>
+                                        {run.paper_confirmation_status === 'completed' ? (
+                                            <p style={{ color: '#15803d', fontWeight: 600, fontSize: 13 }}>
+                                                ✓ {locale === 'ja' ? '紙面確認完了' : 'Paper confirmation complete'}
+                                                {run.paper_confirmation_completed_at && ` — ${new Date(run.paper_confirmation_completed_at).toLocaleString()}`}
+                                            </p>
+                                        ) : (
+                                            isEditable && (
+                                                <button onClick={handlePaperConfirm} disabled={savingPaper}
+                                                    style={{ padding: '8px 16px', background: '#d97706', color: 'white', border: 'none', borderRadius: 6, fontSize: 13, cursor: 'pointer', fontWeight: 600 }}>
+                                                    {savingPaper ? '...' : (locale === 'ja' ? '紙面確認完了として記録' : 'Mark Paper Confirmation Complete')}
+                                                </button>
+                                            )
+                                        )}
+                                    </div>
+                                )}
+
+                                {/* 重要事項説明書交付確認 */}
+                                <div className="section-card" style={{ gridColumn: '1 / -1', borderColor: run.important_matters_delivered ? '#86efac' : '#fca5a5', background: run.important_matters_delivered ? '#f0fdf4' : '#fef2f2' }}>
+                                    <h3 style={{ fontSize: 15, fontWeight: 600, marginBottom: 8, color: run.important_matters_delivered ? '#15803d' : '#991b1b' }}>
+                                        {locale === 'ja' ? '重要事項説明書 交付確認（Fail-Closed）' : 'Important Matters Delivery (Fail-Closed)'}
+                                    </h3>
+                                    {run.important_matters_delivered ? (
+                                        <div>
+                                            <p style={{ color: '#15803d', fontWeight: 600, fontSize: 13 }}>
+                                                ✓ {locale === 'ja' ? '交付確認済み' : 'Delivery confirmed'}
+                                            </p>
+                                            <p style={{ fontSize: 12, color: '#6b7280', marginTop: 4 }}>
+                                                {locale === 'ja' ? '方法: ' : 'Method: '}
+                                                {run.important_matters_delivery_method === 'electronic'
+                                                    ? (locale === 'ja' ? '電子交付' : 'Electronic')
+                                                    : (locale === 'ja' ? '紙面交付' : 'Paper')}
+                                                {run.important_matters_delivered_at && ` — ${new Date(run.important_matters_delivered_at).toLocaleString()}`}
+                                            </p>
+                                        </div>
+                                    ) : (
+                                        isEditable && (
+                                            <div>
+                                                <p style={{ fontSize: 13, color: '#7f1d1d', marginBottom: 10 }}>
+                                                    {locale === 'ja'
+                                                        ? '重要事項説明書を交付するまで確定できません。'
+                                                        : 'Cannot finalize until important matters are delivered.'}
+                                                </p>
+                                                <div style={{ display: 'flex', gap: 8, marginBottom: 10 }}>
+                                                    {(['electronic', 'paper'] as const).map(m => (
+                                                        <label key={m} style={{ display: 'flex', alignItems: 'center', gap: 6, cursor: 'pointer', fontSize: 13 }}>
+                                                            <input type="radio" name="imMethod" value={m}
+                                                                checked={importantMattersMethod === m}
+                                                                onChange={() => setImportantMattersMethod(m)} />
+                                                            {m === 'electronic'
+                                                                ? (locale === 'ja' ? '電子交付' : 'Electronic')
+                                                                : (locale === 'ja' ? '紙面交付' : 'Paper')}
+                                                        </label>
+                                                    ))}
+                                                </div>
+                                                <button onClick={handleImportantMattersDelivery} disabled={savingImportantMatters}
+                                                    style={{ padding: '8px 16px', background: '#dc2626', color: 'white', border: 'none', borderRadius: 6, fontSize: 13, cursor: 'pointer', fontWeight: 600 }}>
+                                                    {savingImportantMatters ? '...' : (locale === 'ja' ? '交付確認を記録する' : 'Record Delivery')}
+                                                </button>
+                                            </div>
+                                        )
+                                    )}
+                                </div>
+                            </>
                         )}
 
                         {/* Suspension banner */}

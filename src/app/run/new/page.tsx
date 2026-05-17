@@ -14,7 +14,8 @@ import Step2IssueSharing from './_steps/Step2IssueSharing'
 import Step3Intent, { type Step3Data } from './_steps/Step3Intent'
 import Step4Scope, { type Step4Data } from './_steps/Step4Scope'
 import Step5Priority, { type Step5Data } from './_steps/Step5Priority'
-import type { CustomerType, RunType, CustomerDecision, AuditEventInsert, RecordingMode, InputDevice } from '@/lib/types'
+import type { CustomerType, RunType, CustomerDecision, AuditEventInsert, RecordingMode, InputDevice, MeetingScene } from '@/lib/types'
+import { MEETING_SCENE_CONFIG } from '@/lib/types'
 
 // ─────────────────────────────────────────────
 // Wizard step definitions
@@ -41,6 +42,8 @@ export default function NewRunPage() {
     // G-20 / G-23: 2-axis recording mode + device selection
     const [recordingMode, setRecordingMode] = useState<RecordingMode>('realtime')
     const [inputDevice, setInputDevice] = useState<InputDevice>('tablet_pc')
+    // G-28: 面談シーンプリセット
+    const [meetingScene, setMeetingScene] = useState<MeetingScene | ''>('')
     const [basicsError, setBasicsError] = useState('')
     const [basicsComplete, setBasicsComplete] = useState(false)
 
@@ -140,6 +143,7 @@ export default function NewRunPage() {
                 condition_change_note: step1Data.conditionChangeNote || null,
                 recording_mode: recordingMode,
                 input_device: inputDevice,
+                meeting_scene: meetingScene || null,
                 run_status: 'draft',
                 export_status: 'pending',
             }).select().single()
@@ -206,6 +210,15 @@ export default function NewRunPage() {
                 operator_id: op.id,
                 payload: { recording_mode: recordingMode, input_device: inputDevice },
             })
+            // G-28: meeting scene selected — fires when scene is chosen
+            if (meetingScene) {
+                events.push({
+                    run_id: runId,
+                    event_type: 'meeting_scene_selected' as const,
+                    operator_id: op.id,
+                    payload: { scene: meetingScene, config: MEETING_SCENE_CONFIG[meetingScene] },
+                })
+            }
             // G-23: agent_input_mode_activated — fires when agent_smartphone selected
             if (inputDevice === 'agent_smartphone') {
                 events.push({
@@ -603,6 +616,46 @@ export default function NewRunPage() {
                                             : '※ Agent enters on behalf of customer. Confirmation wording switches to agent-input format.'}
                                     </p>
                                 )}
+                            </div>
+
+                            {/* G-28: 面談シーンプリセット */}
+                            <div>
+                                <label className="form-label">
+                                    {locale === 'ja' ? '面談シーン（G-28）' : 'Meeting Scene (G-28)'}
+                                </label>
+                                <div className="grid grid-cols-1 gap-2 mt-2">
+                                    {(
+                                        [
+                                            { value: 'visit_smartphone' as MeetingScene, labelJa: '訪問・スマホ連携', labelEn: 'Visit + Smartphone', descJa: '訪問面談、お客様スマホで確認', descEn: 'In-person visit, customer confirms on phone' },
+                                            { value: 'visit_paper' as MeetingScene, labelJa: '訪問・ペーパー確認', labelEn: 'Visit + Paper', descJa: '訪問面談、紙面で確認・募集人入力', descEn: 'In-person visit, paper confirmation' },
+                                            { value: 'pc_tablet' as MeetingScene, labelJa: 'PC・タブレット型', labelEn: 'PC/Tablet', descJa: 'PC/タブレットで電子同意', descEn: 'Electronic consent via PC/tablet' },
+                                            { value: 'telephone' as MeetingScene, labelJa: '電話募集型', labelEn: 'Telephone', descJa: '電話で面談、募集人入力', descEn: 'Telephone meeting, agent input' },
+                                            { value: 'web_meeting' as MeetingScene, labelJa: 'WEB面談', labelEn: 'Web Meeting', descJa: 'オンライン面談、電子同意', descEn: 'Online meeting, electronic consent' },
+                                        ]
+                                    ).map(({ value, labelJa, labelEn, descJa, descEn }) => (
+                                        <label
+                                            key={value}
+                                            className={`radio-card cursor-pointer flex items-center justify-between gap-2 ${meetingScene === value ? 'ring-2 ring-blue-500' : ''}`}
+                                        >
+                                            <input
+                                                type="radio"
+                                                name="meetingScene"
+                                                value={value}
+                                                checked={meetingScene === value}
+                                                onChange={() => setMeetingScene(value)}
+                                                className="sr-only"
+                                            />
+                                            <div>
+                                                <span className="text-sm font-medium">{locale === 'ja' ? labelJa : labelEn}</span>
+                                                <span className="block text-xs text-gray-400">{locale === 'ja' ? descJa : descEn}</span>
+                                            </div>
+                                            {meetingScene === value && <span className="text-blue-600 text-xs font-bold">✓</span>}
+                                        </label>
+                                    ))}
+                                </div>
+                                <p className="text-xs text-gray-400 mt-1">
+                                    {locale === 'ja' ? '※ 未選択の場合はPhase1フローで処理されます' : '※ If not selected, Phase1 flow will be used'}
+                                </p>
                             </div>
 
                             {/* Test flag */}

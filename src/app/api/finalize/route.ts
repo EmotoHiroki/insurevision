@@ -63,6 +63,11 @@ export async function POST(request: Request) {
             return Response.json({ error: 'compare_presented_at not set' }, { status: 422 })
         }
 
+        // Phase2-a: important_matters_delivered gate (only when meeting_scene is set)
+        if (run.meeting_scene && !run.important_matters_delivered) {
+            return Response.json({ error: '重要事項説明書の交付確認が完了していません' }, { status: 422 })
+        }
+
         // ── Build minimal proof stub ──
         const pdfStub = buildMinimalProofStub(run as Run, snapshot as Snapshot | null, consentFlags)
         const pdfJson = JSON.stringify(pdfStub)
