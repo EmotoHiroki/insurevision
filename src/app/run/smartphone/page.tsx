@@ -1,6 +1,6 @@
 'use client'
 
-import { useEffect, useState } from 'react'
+import { useEffect, useState, Suspense } from 'react'
 import { useSearchParams } from 'next/navigation'
 
 type Run = {
@@ -21,7 +21,7 @@ type TokenInfo = {
 
 type PageState = 'loading' | 'ready' | 'confirming' | 'done' | 'error'
 
-export default function SmartphoneTokenConfirmPage() {
+function SmartphoneTokenConfirmContent() {
     const searchParams = useSearchParams()
     const token = searchParams.get('token') ?? ''
 
@@ -172,6 +172,14 @@ export default function SmartphoneTokenConfirmPage() {
                 </div>
             </div>
         </div>
+    )
+}
+
+export default function SmartphoneTokenConfirmPage() {
+    return (
+        <Suspense fallback={<div style={{ minHeight: '100vh', display: 'flex', alignItems: 'center', justifyContent: 'center', fontFamily: 'sans-serif' }}><p style={{ color: '#9ca3af' }}>読み込み中...</p></div>}>
+            <SmartphoneTokenConfirmContent />
+        </Suspense>
     )
 }
 
