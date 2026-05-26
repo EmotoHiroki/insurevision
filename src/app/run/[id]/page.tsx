@@ -468,10 +468,19 @@ export default function RunDetailPage() {
     // ─────────────────────────────────────────────
     // Phase2-a: スマホ確認リンク発行
     // ─────────────────────────────────────────────
-    const handleGenerateSmartphoneUrl = (role: 'recruiter' | 'customer') => {
-        const base = typeof window !== 'undefined' ? window.location.origin : ''
-        const url = `${base}/run/${runId}/smartphone?role=${role}`
-        setSmartphoneUrl(url)
+    const handleGenerateSmartphoneUrl = async (role: 'recruiter' | 'customer') => {
+        try {
+            const res = await fetch(`/api/run/${runId}/smartphone-token`, {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ role }),
+            })
+            if (!res.ok) throw new Error((await res.json()).error)
+            const data = await res.json() as { url: string }
+            setSmartphoneUrl(data.url)
+        } catch (e: unknown) {
+            showToast(e instanceof Error ? e.message : 'Error', 'error')
+        }
     }
 
     const handleCopyUrl = async () => {
