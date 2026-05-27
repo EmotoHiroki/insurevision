@@ -24,7 +24,7 @@ export async function POST(request: Request) {
         }
 
         const { data: run, error: runErr } = await supabase
-            .from('run').select('id, run_status').eq('id', tok.run_id).single()
+            .from('run').select('id, run_status, operator_id').eq('id', tok.run_id).single()
         if (runErr || !run) return Response.json({ error: 'run not found' }, { status: 404 })
         if (run.run_status !== 'draft') {
             return Response.json({ error: 'run not editable' }, { status: 400 })
@@ -56,8 +56,8 @@ export async function POST(request: Request) {
         await supabase.from('audit_event').insert({
             run_id: tok.run_id,
             event_type: eventType,
-            operator_id: tok.run_id, // no operator session on customer phone
-            payload: { role, confirmed_at: now, token_id: token },
+            operator_id: run.operator_id,
+            payload: { role, confirmed_at: now, token_id: token, source: 'smartphone_token' },
         })
 
         return Response.json({ success: true, status: newStatus })
