@@ -19,7 +19,7 @@ type TokenInfo = {
     run: Run | null
 }
 
-type PageState = 'loading' | 'ready' | 'confirming' | 'done' | 'error'
+type PageState = 'loading' | 'ready' | 'confirming' | 'done' | 'already_used' | 'error'
 
 function SmartphoneTokenConfirmContent() {
     const searchParams = useSearchParams()
@@ -45,7 +45,7 @@ function SmartphoneTokenConfirmContent() {
             const data: TokenInfo = await res.json()
             setTokenInfo(data)
             if (data.used) {
-                setPageState('done')
+                setPageState('already_used')
             } else if (data.expired) {
                 setErrorMsg('確認URLの有効期限が切れています。募集人に再発行をご依頼ください。')
                 setPageState('error')
@@ -85,6 +85,29 @@ function SmartphoneTokenConfirmContent() {
         return (
             <div style={styles.center}>
                 <p style={styles.muted}>読み込み中...</p>
+            </div>
+        )
+    }
+
+    if (pageState === 'already_used') {
+        const confirmedAt = role === 'recruiter'
+            ? tokenInfo?.run?.recruiter_smartphone_confirmed_at
+            : tokenInfo?.run?.customer_smartphone_confirmed_at
+        const confirmedStr = confirmedAt
+            ? new Date(confirmedAt).toLocaleString('ja-JP')
+            : null
+        return (
+            <div style={styles.center}>
+                <div style={{ ...styles.card, borderColor: '#fcd34d' }}>
+                    <div style={{ fontSize: 36, textAlign: 'center', marginBottom: 12 }}>✓</div>
+                    <p style={{ color: '#92400e', fontWeight: 700, textAlign: 'center', marginBottom: 8 }}>確認済み</p>
+                    <p style={{ fontSize: 13, color: '#78350f', textAlign: 'center', marginBottom: confirmedStr ? 8 : 0 }}>
+                        {role === 'recruiter' ? '募集人確認' : 'お客様確認'}はすでに記録されています。
+                    </p>
+                    {confirmedStr && (
+                        <p style={{ fontSize: 12, color: '#92400e', textAlign: 'center' }}>確認日時: {confirmedStr}</p>
+                    )}
+                </div>
             </div>
         )
     }
