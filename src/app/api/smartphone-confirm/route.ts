@@ -87,18 +87,27 @@ export async function GET(request: Request) {
 
         if (tokErr || !tok) return Response.json({ error: 'invalid token' }, { status: 404 })
 
-        const { data: run } = await supabase
-            .from('run')
-            .select('id, customer_ref, customer_name, recruiter_smartphone_confirmed_at, customer_smartphone_confirmed_at')
-            .eq('id', tok.run_id)
-            .single()
+        const isUsed = !!tok.used_at
+        const isExpired = new Date(tok.expires_at) < new Date()
+        const isValid = !isUsed && !isExpired
+
+        // Only return run info for valid tokens -- expired/used tokens must not leak customer data
+        let run = null
+        if (isValid) {
+            const { data } = await supabase
+                .from('run')
+                .select('id, customer_ref, customer_name, recruiter_smartphone_confirmed_at, customer_smartphone_confirmed_at')
+                .eq('id', tok.run_id)
+                .single()
+            run = data ?? null
+        }
 
         return Response.json({
-            valid: !tok.used_at && new Date(tok.expires_at) >= new Date(),
-            used: !!tok.used_at,
-            expired: new Date(tok.expires_at) < new Date(),
+            valid: isValid,
+            used: isUsed,
+            expired: isExpired,
             role: tok.role,
-            run: run ?? null,
+            run,
         })
     } catch (err: unknown) {
         return Response.json(
