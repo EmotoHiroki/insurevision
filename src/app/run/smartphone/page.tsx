@@ -16,6 +16,7 @@ type TokenInfo = {
     used: boolean
     expired: boolean
     role: 'recruiter' | 'customer'
+    confirmed_at: string | null
     run: Run | null
 }
 
@@ -38,7 +39,7 @@ function SmartphoneTokenConfirmContent() {
         const load = async () => {
             const res = await fetch(`/api/smartphone-confirm?token=${encodeURIComponent(token)}`)
             if (!res.ok) {
-                setErrorMsg('URLが無効か期限切れです。募集人に再送付をご依頼ください。')
+                setErrorMsg('確認URLが無効です。募集人から受け取ったURLをご使用ください。')
                 setPageState('error')
                 return
             }
@@ -47,10 +48,10 @@ function SmartphoneTokenConfirmContent() {
             if (data.used) {
                 setPageState('already_used')
             } else if (data.expired) {
-                setErrorMsg('確認URLの有効期限が切れています。募集人に再発行をご依頼ください。')
+                setErrorMsg('確認URLの有効期限が切れています。募集人に新しいURLの発行をご依頼ください。')
                 setPageState('error')
             } else if (!data.valid) {
-                setErrorMsg('URLが無効です。募集人から受け取ったURLをご使用ください。')
+                setErrorMsg('確認URLが無効です。募集人から受け取ったURLをご使用ください。')
                 setPageState('error')
             } else {
                 setPageState('ready')
@@ -90,9 +91,7 @@ function SmartphoneTokenConfirmContent() {
     }
 
     if (pageState === 'already_used') {
-        const confirmedAt = role === 'recruiter'
-            ? tokenInfo?.run?.recruiter_smartphone_confirmed_at
-            : tokenInfo?.run?.customer_smartphone_confirmed_at
+        const confirmedAt = tokenInfo?.confirmed_at
         const confirmedStr = confirmedAt
             ? new Date(confirmedAt).toLocaleString('ja-JP')
             : null

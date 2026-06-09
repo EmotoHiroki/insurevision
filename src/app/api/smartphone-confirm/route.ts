@@ -107,6 +107,7 @@ export async function GET(request: Request) {
             used: isUsed,
             expired: isExpired,
             role: tok.role,
+            confirmed_at: tok.used_at ?? null,
             run,
         })
     } catch (err: unknown) {
