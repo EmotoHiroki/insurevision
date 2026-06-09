@@ -2095,16 +2095,45 @@ export default function RunDetailPage() {
                                     </div>
                                 </div>
 
-                                {/* ── 書面生成（将来実装プレースホルダー） ── */}
-                                <div className="section-card" style={{ borderStyle: 'dashed', background: '#fafafa' }}>
-                                    <h3 style={{ fontSize: 15, fontWeight: 700, marginBottom: 4, color: '#9ca3af' }}>
-                                        {locale === 'ja' ? 'A-1/A-2 書面出力（実装中）' : 'A-1/A-2 Document Output (in progress)'}
+                                {/* ── A-1/A-2 書面出力 ── */}
+                                <div className="section-card">
+                                    <h3 style={{ fontSize: 15, fontWeight: 700, marginBottom: 8 }}>
+                                        {locale === 'ja' ? '書面出力' : 'Document Output'}
                                     </h3>
-                                    <p style={{ fontSize: 12, color: '#9ca3af' }}>
-                                        {locale === 'ja'
-                                            ? 'お客様シート（A4 2枚）・代理店控え（A4 4枚）のPDF生成機能は実装中です。現時点ではCSV出力と上記データ確認をご利用ください。'
-                                            : 'Customer sheet (A4 2p) and agency copy (A4 4p) PDF generation is being implemented. Use CSV export and data review above for now.'}
-                                    </p>
+                                    <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
+                                        <a
+                                            href={`/run/${runId}/print/customer-sheet`}
+                                            target="_blank"
+                                            rel="noopener noreferrer"
+                                            style={{ display: 'flex', alignItems: 'center', gap: 10, padding: '10px 14px', background: '#eff6ff', border: '1px solid #bfdbfe', borderRadius: 8, textDecoration: 'none', color: '#1d4ed8' }}
+                                        >
+                                            <span style={{ fontSize: 20 }}>📄</span>
+                                            <div>
+                                                <div style={{ fontSize: 13, fontWeight: 700 }}>
+                                                    {locale === 'ja' ? 'A-1 お客様シート（A4 2枚）' : 'A-1 Customer Sheet (A4 2p)'}
+                                                </div>
+                                                <div style={{ fontSize: 11, color: '#3b82f6', marginTop: 2 }}>
+                                                    {locale === 'ja' ? '診断結果・意向把握 ／ 比較表・ご提案・ご選択 - 新しいタブで開く' : 'Diagnosis / Comparison / Plan selection - opens in new tab'}
+                                                </div>
+                                            </div>
+                                        </a>
+                                        <a
+                                            href={`/run/${runId}/print/agency-report`}
+                                            target="_blank"
+                                            rel="noopener noreferrer"
+                                            style={{ display: 'flex', alignItems: 'center', gap: 10, padding: '10px 14px', background: '#f9fafb', border: '1px solid #e5e7eb', borderRadius: 8, textDecoration: 'none', color: '#374151' }}
+                                        >
+                                            <span style={{ fontSize: 20 }}>📋</span>
+                                            <div>
+                                                <div style={{ fontSize: 13, fontWeight: 700 }}>
+                                                    {locale === 'ja' ? 'A-2 代理店控え（A4 4枚）' : 'A-2 Agency Copy (A4 4p)'}
+                                                </div>
+                                                <div style={{ fontSize: 11, color: '#6b7280', marginTop: 2 }}>
+                                                    {locale === 'ja' ? '3軸比較・差異・品質チェック・証跡タイムライン・ログ原文 - 新しいタブで開く' : '3-axis compare / diff / quality checks / timeline / raw logs - opens in new tab'}
+                                                </div>
+                                            </div>
+                                        </a>
+                                    </div>
                                 </div>
                             </>
                         )}

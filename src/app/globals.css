@@ -541,3 +541,13 @@ textarea {
     grid-template-columns: 1fr !important;
   }
 }
+
+@media print {
+  body { background: white !important; margin: 0; padding: 0; }
+  .noPrint { display: none !important; }
+  @page { size: A4; margin: 0; }
+}
+
+@media print {
+  .print-hide { display: none !important; }
+}
