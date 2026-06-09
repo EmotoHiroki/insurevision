@@ -132,6 +132,7 @@ export default function RunDetailPage() {
     const [importantMattersMethod, setImportantMattersMethod] = useState<'electronic' | 'paper'>('electronic')
     const [smartphoneUrl, setSmartphoneUrl] = useState('')
     const [copied, setCopied] = useState(false)
+    const [lastRefreshed, setLastRefreshed] = useState<Date | null>(null)
     // Documents tab (MS3)
     const [reportData, setReportData] = useState<Record<string, unknown> | null>(null)
     const [loadingReport, setLoadingReport] = useState(false)
@@ -180,10 +181,21 @@ export default function RunDetailPage() {
             .from('audit_event').select('*').eq('run_id', runId).order('occurred_at', { ascending: true })
         setAuditEvents((auditData as AuditEvent[]) || [])
 
+        setLastRefreshed(new Date())
         setLoading(false)
     }, [runId, router])
 
     useEffect(() => { loadData() }, [loadData])
+
+    // B-1: lightweight polling when smartphone confirmation is pending
+    useEffect(() => {
+        if (!run) return
+        const isPending = run.smartphone_conf_status === 'pending' ||
+            run.smartphone_conf_status === 'recruiter_confirmed'
+        if (!isPending || run.run_status !== 'draft') return
+        const interval = setInterval(() => { loadData() }, 30000)
+        return () => clearInterval(interval)
+    }, [run, loadData])
 
     // ─────────────────────────────────────────────
     // Comparison tab actions
@@ -668,6 +680,27 @@ export default function RunDetailPage() {
             labelEn: 'Important matters delivery confirmed (Phase2-a)',
             pass: run.important_matters_delivered,
         }] : []),
+        // Phase2-a: electronic consent must be recorded when scene requires it
+        ...((['visit_smartphone', 'pc_tablet', 'web_meeting'] as const).includes(run.meeting_scene as 'visit_smartphone' | 'pc_tablet' | 'web_meeting') ? [{
+            id: 'electronic_consent_recorded',
+            labelJa: '電子同意確認が記録されている（Phase2-a）',
+            labelEn: 'Electronic consent recorded (Phase2-a)',
+            pass: !!run.electronic_consent_status && run.electronic_consent_status !== 'not_recorded',
+        }] : []),
+        // Phase2-a: smartphone confirmation complete for visit_smartphone
+        ...(run.meeting_scene === 'visit_smartphone' && run.electronic_consent_status !== 'declined' ? [{
+            id: 'customer_smartphone_confirmed',
+            labelJa: 'お客様スマホ確認が完了している（Phase2-a）',
+            labelEn: 'Customer smartphone confirmation complete (Phase2-a)',
+            pass: !!run.customer_smartphone_confirmed_at,
+        }] : []),
+        // MS3: D-4 plan selection recorded when comparison done
+        ...(run.compare_presented_at ? [{
+            id: 'decided_plan_set',
+            labelJa: 'お客様決定プランが設定されている（MS3）',
+            labelEn: 'Customer decided plan set (MS3)',
+            pass: !!run.decided_candidate_id,
+        }] : []),
     ] : []
 
     const allPreflightPass = preflightChecks.every(c => c.pass)
@@ -748,11 +781,14 @@ export default function RunDetailPage() {
                     }}>
                         <LuGlobe size={14} /> {locale === 'ja' ? 'EN' : 'JA'}
                     </button>
-                    <button onClick={loadData} style={{
+                    <button onClick={loadData} title={lastRefreshed ? `最終更新: ${lastRefreshed.toLocaleTimeString()}` : '更新'} style={{
                         background: 'rgba(255,255,255,0.1)', border: 'none', color: 'white',
-                        padding: '6px 10px', borderRadius: 6, cursor: 'pointer',
+                        padding: '6px 10px', borderRadius: 6, cursor: 'pointer', display: 'flex', alignItems: 'center', gap: 4,
                     }}>
                         <LuRefreshCw size={16} />
+                        {lastRefreshed && (
+                            <span style={{ fontSize: 10, opacity: 0.7 }}>{lastRefreshed.toLocaleTimeString('ja-JP', { hour: '2-digit', minute: '2-digit' })}</span>
+                        )}
                     </button>
                 </div>
             </header>
@@ -975,9 +1011,17 @@ export default function RunDetailPage() {
                                 {/* スマホ確認導線 (visit_smartphone のみ) */}
                                 {run.meeting_scene === 'visit_smartphone' && run.electronic_consent_status !== 'declined' && (
                                     <div className="section-card" style={{ gridColumn: '1 / -1' }}>
-                                        <h3 style={{ fontSize: 15, fontWeight: 600, marginBottom: 12, color: '#1d4ed8' }}>
-                                            {locale === 'ja' ? 'スマホ確認導線' : 'Smartphone Confirmation'}
-                                        </h3>
+                                        <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: 12 }}>
+                                            <h3 style={{ fontSize: 15, fontWeight: 600, color: '#1d4ed8' }}>
+                                                {locale === 'ja' ? 'スマホ確認導線' : 'Smartphone Confirmation'}
+                                            </h3>
+                                            {(run.smartphone_conf_status === 'pending' || run.smartphone_conf_status === 'recruiter_confirmed') && (
+                                                <span style={{ fontSize: 11, color: '#6b7280', display: 'flex', alignItems: 'center', gap: 4 }}>
+                                                    <LuRefreshCw size={11} className="animate-pulse-soft" />
+                                                    {locale === 'ja' ? '30秒ごとに自動更新' : 'Auto-refreshing every 30s'}
+                                                </span>
+                                            )}
+                                        </div>
                                         <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 12 }}>
                                             <div style={{ background: run.recruiter_smartphone_confirmed_at ? '#f0fdf4' : '#f9fafb', borderRadius: 8, padding: 14, border: '1px solid #e5e7eb' }}>
                                                 <p style={{ fontWeight: 600, fontSize: 13, marginBottom: 6 }}>
