@@ -10,13 +10,13 @@ import { format } from 'date-fns'
 import {
     LuShield, LuGlobe, LuArrowLeft, LuCheck, LuPlus, LuTrash2,
     LuClock, LuUser, LuRefreshCw, LuFileText, LuChartBar, LuLock,
-    LuCircleCheck, LuCircleX,
+    LuCircleCheck, LuCircleX, LuDownload, LuTriangle,
 } from 'react-icons/lu'
 
 // ─────────────────────────────────────────────
 // Types
 // ─────────────────────────────────────────────
-type TabKey = 'overview' | 'comparison' | 'finalize' | 'audit'
+type TabKey = 'overview' | 'comparison' | 'finalize' | 'audit' | 'documents'
 
 // ─────────────────────────────────────────────
 // D-C: RedundancyRow sub-component
@@ -132,6 +132,13 @@ export default function RunDetailPage() {
     const [importantMattersMethod, setImportantMattersMethod] = useState<'electronic' | 'paper'>('electronic')
     const [smartphoneUrl, setSmartphoneUrl] = useState('')
     const [copied, setCopied] = useState(false)
+    // Documents tab (MS3)
+    const [reportData, setReportData] = useState<Record<string, unknown> | null>(null)
+    const [loadingReport, setLoadingReport] = useState(false)
+    const [savingPlanSelection, setSavingPlanSelection] = useState(false)
+    const [recommendedId, setRecommendedId] = useState<string>('')
+    const [decidedId, setDecidedId] = useState<string>('')
+    const [planDiffReason, setPlanDiffReason] = useState<string>('')
 
     // ─────────────────────────────────────────────
     const showToast = (msg: string, type: 'success' | 'error' = 'success') => {
@@ -161,6 +168,9 @@ export default function RunDetailPage() {
             setDeliveryMethod((runData as Run).delivery_method ?? '')
             setDeliveryConfirmed(!!(runData as Run).delivery_confirmed_at)
             setDeliveryReference((runData as Run).delivery_reference ?? '')
+            setRecommendedId((runData as Run).recommended_candidate_id ?? '')
+            setDecidedId((runData as Run).decided_candidate_id ?? '')
+            setPlanDiffReason((runData as Run).plan_diff_reason ?? '')
         }
 
         const { data: candData } = await supabase.from('candidate').select('*').eq('run_id', runId).order('slot_no')
@@ -548,6 +558,44 @@ export default function RunDetailPage() {
     }
 
     // ─────────────────────────────────────────────
+    // MS3: 書面タブ
+    // ─────────────────────────────────────────────
+    const loadReportData = async () => {
+        setLoadingReport(true)
+        try {
+            const res = await fetch(`/api/run/${runId}/report-data`)
+            if (res.ok) setReportData(await res.json())
+        } finally { setLoadingReport(false) }
+    }
+
+    const handleSavePlanSelection = async () => {
+        if (!operator) return
+        setSavingPlanSelection(true)
+        try {
+            const res = await fetch(`/api/run/${runId}/plan-selection`, {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({
+                    operatorId: operator.id,
+                    recommendedCandidateId: recommendedId || null,
+                    decidedCandidateId: decidedId || null,
+                    planDiffReason: planDiffReason.trim() || null,
+                }),
+            })
+            if (!res.ok) throw new Error((await res.json()).error)
+            showToast(locale === 'ja' ? 'プラン選択を保存しました' : 'Plan selection saved')
+            await loadData()
+            await loadReportData()
+        } catch (e: unknown) {
+            showToast(e instanceof Error ? e.message : 'Error', 'error')
+        } finally { setSavingPlanSelection(false) }
+    }
+
+    const handleDownloadCsv = () => {
+        window.open(`/api/run/${runId}/csv-export`, '_blank')
+    }
+
+    // ─────────────────────────────────────────────
     // Finalize
     // ─────────────────────────────────────────────
     const handleFinalize = async () => {
@@ -667,6 +715,7 @@ export default function RunDetailPage() {
         { key: 'comparison', labelJa: '比較', labelEn: 'Comparison', icon: LuChartBar },
         { key: 'finalize', labelJa: '確定', labelEn: 'Finalize', icon: LuLock },
         { key: 'audit', labelJa: '監査ログ', labelEn: 'Audit', icon: LuClock },
+        { key: 'documents', labelJa: '書面・証跡', labelEn: 'Documents', icon: LuFileText },
     ]
 
     return (
@@ -1792,6 +1841,229 @@ export default function RunDetailPage() {
                                 </button>
                             )}
                         </div>
+                    </div>
+                )}
+
+                {/* ═══════════════════════════════════════ */}
+                {/* TAB: DOCUMENTS (MS3)                    */}
+                {/* ═══════════════════════════════════════ */}
+                {activeTab === 'documents' && (
+                    <div className="animate-fade-in space-y-6">
+                        {/* Load report data button */}
+                        {!reportData && (
+                            <div className="section-card" style={{ textAlign: 'center', padding: 32 }}>
+                                <LuFileText size={32} color="#d1d5db" style={{ marginBottom: 12 }} />
+                                <p style={{ fontSize: 14, color: 'var(--text-secondary)', marginBottom: 16 }}>
+                                    {locale === 'ja' ? '書面・証跡データを読み込んでください' : 'Load document and audit data'}
+                                </p>
+                                <button className="btn-primary" onClick={loadReportData} disabled={loadingReport} style={{ fontSize: 13 }}>
+                                    {loadingReport ? '...' : (locale === 'ja' ? 'データを読み込む' : 'Load Data')}
+                                </button>
+                            </div>
+                        )}
+
+                        {reportData && (
+                            <>
+                                {/* ── D-3/D-4: 推奨・決定プラン選択 + 差異理由 ── */}
+                                <div className="section-card">
+                                    <h3 style={{ fontSize: 15, fontWeight: 700, marginBottom: 4, color: '#1d4ed8' }}>
+                                        {locale === 'ja' ? 'D-3/D-4 推奨・決定プラン + 差異理由' : 'D-3/D-4 Plan Selection + Diff Reason'}
+                                    </h3>
+                                    <p style={{ fontSize: 12, color: '#6b7280', marginBottom: 14 }}>
+                                        {locale === 'ja'
+                                            ? '代理店控えの「3軸比較（現在契約／募集人おすすめ／お客様決定）」と差異理由を設定します。差異理由は内部記録のみ（お客様シート非表示）。'
+                                            : '3-axis comparison (prior/recommended/decided) and plan difference reason for agency copy only.'}
+                                    </p>
+
+                                    {/* Diff warning */}
+                                    {(reportData.planDiffExists as boolean) && !(reportData.planDiffReasonRecorded as boolean) && (
+                                        <div style={{ display: 'flex', alignItems: 'center', gap: 8, background: '#fffbeb', border: '1px solid #fcd34d', borderRadius: 8, padding: '10px 14px', marginBottom: 14 }}>
+                                            <LuTriangle size={16} color="#d97706" />
+                                            <span style={{ fontSize: 13, color: '#92400e', fontWeight: 600 }}>
+                                                {locale === 'ja' ? '差異理由未記録 — 推奨プランとお客様決定プランが異なります' : 'Plan diff reason not recorded'}
+                                            </span>
+                                        </div>
+                                    )}
+
+                                    <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 14 }}>
+                                        <div>
+                                            <label className="form-label">{locale === 'ja' ? '募集人推奨プラン' : 'Recommended Plan'}</label>
+                                            <select className="form-select" value={recommendedId}
+                                                onChange={e => setRecommendedId(e.target.value)}
+                                                disabled={!isEditable}>
+                                                <option value="">{locale === 'ja' ? '選択してください' : 'Select'}</option>
+                                                {candidates.filter(c => c.status === 'active').map(c => (
+                                                    <option key={c.id} value={c.id}>
+                                                        {c.insurer_name}{c.product_name ? ` / ${c.product_name}` : ''}{c.annual_premium ? ` ¥${c.annual_premium.toLocaleString()}` : ''} ({c.role ?? 'plan'})
+                                                    </option>
+                                                ))}
+                                            </select>
+                                        </div>
+                                        <div>
+                                            <label className="form-label">{locale === 'ja' ? 'お客様決定プラン' : 'Decided Plan'}</label>
+                                            <select className="form-select" value={decidedId}
+                                                onChange={e => setDecidedId(e.target.value)}
+                                                disabled={!isEditable}>
+                                                <option value="">{locale === 'ja' ? '選択してください' : 'Select'}</option>
+                                                {candidates.filter(c => c.status === 'active').map(c => (
+                                                    <option key={c.id} value={c.id}>
+                                                        {c.insurer_name}{c.product_name ? ` / ${c.product_name}` : ''}{c.annual_premium ? ` ¥${c.annual_premium.toLocaleString()}` : ''} ({c.role ?? 'plan'})
+                                                    </option>
+                                                ))}
+                                            </select>
+                                        </div>
+                                    </div>
+
+                                    {/* Show diff notice + reason input when plans differ */}
+                                    {recommendedId && decidedId && recommendedId !== decidedId && (
+                                        <div style={{ marginTop: 12 }}>
+                                            <label className="form-label">
+                                                {locale === 'ja' ? '差異理由（代理店控えのみ・内部記録）' : 'Difference reason (agency copy only)'}
+                                                <span style={{ marginLeft: 6, fontSize: 11, color: '#dc2626', fontWeight: 700 }}>
+                                                    {!planDiffReason.trim() ? (locale === 'ja' ? '未記録' : 'Not recorded') : ''}
+                                                </span>
+                                            </label>
+                                            <textarea
+                                                value={planDiffReason}
+                                                onChange={e => setPlanDiffReason(e.target.value)}
+                                                disabled={!isEditable}
+                                                rows={2}
+                                                placeholder={locale === 'ja' ? '例：お客様の予算制約により保険料を優先されました' : 'e.g. Customer prioritized premium due to budget constraints'}
+                                                style={{ width: '100%', padding: '8px 10px', borderRadius: 8, border: `1px solid ${!planDiffReason.trim() ? '#fca5a5' : '#e2e8f0'}`, fontSize: 13, resize: 'vertical' }}
+                                            />
+                                        </div>
+                                    )}
+
+                                    {isEditable && (
+                                        <button className="btn-primary" onClick={handleSavePlanSelection}
+                                            disabled={savingPlanSelection} style={{ marginTop: 12, fontSize: 13 }}>
+                                            {savingPlanSelection ? '...' : (locale === 'ja' ? '保存' : 'Save')}
+                                        </button>
+                                    )}
+                                </div>
+
+                                {/* ── D-8: 業務品質チェック ── */}
+                                <div className="section-card">
+                                    <h3 style={{ fontSize: 15, fontWeight: 700, marginBottom: 4, color: '#1d4ed8' }}>
+                                        {locale === 'ja' ? 'D-8 業務品質チェック（10項目）' : 'D-8 Business Quality Check (10 items)'}
+                                    </h3>
+                                    <p style={{ fontSize: 12, color: '#6b7280', marginBottom: 14 }}>
+                                        {locale === 'ja' ? '既存フラグ・イベントから自動導出。代理店控えに掲載されます。' : 'Auto-derived from existing flags and events. Included in agency copy.'}
+                                    </p>
+                                    {(() => {
+                                        const checks = reportData.qualityChecks as Array<{ id: string; label: string; pass: boolean; note: string }>
+                                        const passCount = checks.filter(c => c.pass).length
+                                        return (
+                                            <>
+                                                <div style={{ display: 'flex', gap: 12, marginBottom: 14 }}>
+                                                    <div style={{ background: passCount === 10 ? '#f0fdf4' : '#fffbeb', border: `1px solid ${passCount === 10 ? '#86efac' : '#fcd34d'}`, borderRadius: 8, padding: '8px 16px', fontSize: 13, fontWeight: 700, color: passCount === 10 ? '#15803d' : '#92400e' }}>
+                                                        {passCount} / 10 {locale === 'ja' ? '項目クリア' : 'items passed'}
+                                                    </div>
+                                                </div>
+                                                <div style={{ display: 'grid', gap: 6 }}>
+                                                    {checks.map(c => (
+                                                        <div key={c.id} style={{ display: 'flex', alignItems: 'center', gap: 10, fontSize: 13, padding: '8px 12px', borderRadius: 8, background: c.pass ? 'rgba(22,163,74,0.06)' : 'rgba(220,38,38,0.06)' }}>
+                                                            {c.pass
+                                                                ? <LuCircleCheck size={15} color="#16a34a" />
+                                                                : <LuCircleX size={15} color="#dc2626" />}
+                                                            <span style={{ fontWeight: 600, color: c.pass ? '#15803d' : '#991b1b', minWidth: 180 }}>{c.label}</span>
+                                                            <span style={{ fontSize: 11, color: '#9ca3af' }}>{c.note}</span>
+                                                        </div>
+                                                    ))}
+                                                </div>
+                                            </>
+                                        )
+                                    })()}
+                                </div>
+
+                                {/* ── D-7: 監査タイムライン ── */}
+                                <div className="section-card">
+                                    <h3 style={{ fontSize: 15, fontWeight: 700, marginBottom: 4, color: '#1d4ed8' }}>
+                                        {locale === 'ja' ? 'D-7 監査用タイムライン（最大14件）' : 'D-7 Audit Timeline (max 14)'}
+                                    </h3>
+                                    <p style={{ fontSize: 12, color: '#6b7280', marginBottom: 14 }}>
+                                        {locale === 'ja' ? '代理店控えの証跡ページに掲載されます。' : 'Included in agency copy audit page.'}
+                                    </p>
+                                    {(() => {
+                                        const tl = reportData.timeline as Array<{ no: number; occurred_at: string; category: string; label: string; payload_summary: string }>
+                                        const CATEGORY_COLOR: Record<string, string> = {
+                                            '現状確認': '#6366f1', '記録': '#0891b2', '意向把握': '#d97706',
+                                            '比較・案内': '#16a34a', '最終確認': '#dc2626', '確定': '#1d4ed8',
+                                        }
+                                        return tl.length === 0 ? (
+                                            <p style={{ fontSize: 13, color: '#9ca3af' }}>{locale === 'ja' ? '証跡イベントがありません' : 'No audit events'}</p>
+                                        ) : (
+                                            <div style={{ overflowX: 'auto' }}>
+                                                <table className="data-table" style={{ fontSize: 12 }}>
+                                                    <thead>
+                                                        <tr>
+                                                            <th>No.</th>
+                                                            <th>{locale === 'ja' ? '日時' : 'Time'}</th>
+                                                            <th>{locale === 'ja' ? '区分' : 'Category'}</th>
+                                                            <th>{locale === 'ja' ? 'イベント' : 'Event'}</th>
+                                                            <th>{locale === 'ja' ? '補足' : 'Notes'}</th>
+                                                        </tr>
+                                                    </thead>
+                                                    <tbody>
+                                                        {tl.map(row => (
+                                                            <tr key={row.no}>
+                                                                <td style={{ fontWeight: 600 }}>{row.no}</td>
+                                                                <td style={{ whiteSpace: 'nowrap', color: '#6b7280' }}>
+                                                                    {format(new Date(row.occurred_at), 'MM/dd HH:mm')}
+                                                                </td>
+                                                                <td>
+                                                                    <span style={{ fontSize: 11, padding: '2px 8px', borderRadius: 10, fontWeight: 700, background: `${CATEGORY_COLOR[row.category] ?? '#6b7280'}18`, color: CATEGORY_COLOR[row.category] ?? '#6b7280' }}>
+                                                                        {row.category}
+                                                                    </span>
+                                                                </td>
+                                                                <td style={{ fontWeight: 600 }}>{row.label}</td>
+                                                                <td style={{ color: '#9ca3af', fontFamily: 'monospace', fontSize: 11 }}>{row.payload_summary}</td>
+                                                            </tr>
+                                                        ))}
+                                                    </tbody>
+                                                </table>
+                                            </div>
+                                        )
+                                    })()}
+                                </div>
+
+                                {/* ── A-3: CSV出力 ── */}
+                                <div className="section-card">
+                                    <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: 8 }}>
+                                        <div>
+                                            <h3 style={{ fontSize: 15, fontWeight: 700, color: '#1d4ed8' }}>
+                                                {locale === 'ja' ? 'A-3 CSV骨格出力' : 'A-3 CSV Export (Skeleton)'}
+                                            </h3>
+                                            <p style={{ fontSize: 12, color: '#6b7280', marginTop: 4 }}>
+                                                {locale === 'ja'
+                                                    ? 'フィールド定義・出力形式の骨格CSVをダウンロードします。完全マッピング・取込処理はPhase2-b。'
+                                                    : 'Download field-definition skeleton CSV. Full mapping and import processing = Phase2-b.'}
+                                            </p>
+                                        </div>
+                                        <button className="btn-secondary" onClick={handleDownloadCsv}
+                                            style={{ display: 'flex', alignItems: 'center', gap: 6, fontSize: 13, whiteSpace: 'nowrap' }}>
+                                            <LuDownload size={14} />
+                                            {locale === 'ja' ? 'CSV出力' : 'Export CSV'}
+                                        </button>
+                                    </div>
+                                    <div style={{ background: '#f9fafb', borderRadius: 8, padding: '10px 14px', fontSize: 12, color: '#6b7280' }}>
+                                        {locale === 'ja' ? `出力フィールド: 案件基本情報 / 意向・同意 / スマホ確認 / プラン選択 / 比較プラン（${candidates.length}件可変） / 証跡サマリー` : `Fields: Run info / Consent / Smartphone / Plan selection / ${candidates.length} plans (variable) / Audit summary`}
+                                    </div>
+                                </div>
+
+                                {/* ── 書面生成（将来実装プレースホルダー） ── */}
+                                <div className="section-card" style={{ borderStyle: 'dashed', background: '#fafafa' }}>
+                                    <h3 style={{ fontSize: 15, fontWeight: 700, marginBottom: 4, color: '#9ca3af' }}>
+                                        {locale === 'ja' ? 'A-1/A-2 書面出力（実装中）' : 'A-1/A-2 Document Output (in progress)'}
+                                    </h3>
+                                    <p style={{ fontSize: 12, color: '#9ca3af' }}>
+                                        {locale === 'ja'
+                                            ? 'お客様シート（A4 2枚）・代理店控え（A4 4枚）のPDF生成機能は実装中です。現時点ではCSV出力と上記データ確認をご利用ください。'
+                                            : 'Customer sheet (A4 2p) and agency copy (A4 4p) PDF generation is being implemented. Use CSV export and data review above for now.'}
+                                    </p>
+                                </div>
+                            </>
+                        )}
                     </div>
                 )}
 

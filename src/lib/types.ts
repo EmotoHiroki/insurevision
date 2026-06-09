@@ -104,6 +104,10 @@ export type AuditEventType =
     | 'customer_smartphone_confirmed'   // Phase2-a: お客様スマホ確認完了
     | 'paper_confirmation_completed'    // Phase2-a: 紙面確認完了
     | 'important_matters_delivery_confirmed' // Phase2-a: 重要事項説明書交付確認
+    | 'recommended_plan_set'            // MS3: 推奨プラン設定
+    | 'decided_plan_set'                // MS3: 決定プラン設定
+    | 'plan_diff_reason_recorded'       // MS3: 差異理由記録
+    | 'agency_report_generated'         // MS3: 代理店控え生成
 
 // =============================================
 // Table Interfaces
@@ -197,6 +201,13 @@ export interface Run {
     important_matters_delivery_method: ImportantMattersDeliveryMethod | null
     // Phase2-a: canNext制御
     can_next_blocked_reasons: string[]
+    // MS3: 推奨・決定プラン + 差異理由
+    recommended_candidate_id: string | null
+    decided_candidate_id: string | null
+    plan_diff_reason: string | null
+    plan_diff_reason_recorded_at: string | null
+    customer_sheet_generated_at: string | null
+    agency_report_generated_at: string | null
     // Meta
     core_logic_version: string
     is_test: boolean
