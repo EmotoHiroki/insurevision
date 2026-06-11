@@ -4,8 +4,8 @@ import { useEffect, useState, Suspense } from 'react'
 import { useParams } from 'next/navigation'
 import { format } from 'date-fns'
 
-type QualityCheck = { label: string; passed: boolean; note: string }
-type TimelineEntry = { category: string; label: string; occurredAt: string; detail: string | null }
+type QualityCheck = { label: string; pass: boolean; note: string }
+type TimelineEntry = { category: string; label: string; occurred_at: string; payload_summary: string }
 type AuditEvent = { id: string; event_type: string; occurred_at: string; metadata: Record<string, unknown> | null }
 
 type ReportData = {
@@ -333,10 +333,10 @@ function AgencyReportContent() {
                                     <td style={{ ...s.td, textAlign: 'center' }}>
                                         <span style={{
                                             fontWeight: 700,
-                                            color: qc.passed ? '#15803d' : '#dc2626',
+                                            color: qc.pass ? '#15803d' : '#dc2626',
                                             fontSize: 10,
                                         }}>
-                                            {qc.passed ? '○' : '✗'}
+                                            {qc.pass ? '○' : '✗'}
                                         </span>
                                     </td>
                                     <td style={{ ...s.td, fontSize: 7, color: '#6b7280' }}>{qc.note || '—'}</td>
@@ -345,7 +345,7 @@ function AgencyReportContent() {
                         </tbody>
                     </table>
                     <div style={{ marginTop: 4, fontSize: 7, color: '#6b7280' }}>
-                        合計: {qualityChecks.filter(q => q.passed).length}/{qualityChecks.length} 項目合格
+                        合計: {qualityChecks.filter(q => q.pass).length}/{qualityChecks.length} 項目合格
                     </div>
                 </div>
 
@@ -454,7 +454,7 @@ function AgencyReportContent() {
                                 {timeline.slice(0, 14).map((entry, i) => (
                                     <tr key={i} style={{ background: i % 2 === 0 ? '#f9fafb' : 'white' }}>
                                         <td style={{ ...s.td, fontSize: 7, fontFamily: 'monospace' }}>
-                                            {format(new Date(entry.occurredAt), 'yyyy/M/d HH:mm')}
+                                            {format(new Date(entry.occurred_at), 'yyyy/M/d HH:mm')}
                                         </td>
                                         <td style={s.td}>
                                             <span style={{
@@ -466,7 +466,7 @@ function AgencyReportContent() {
                                             </span>
                                         </td>
                                         <td style={s.td}>{entry.label}</td>
-                                        <td style={{ ...s.td, fontSize: 7, color: '#6b7280' }}>{entry.detail || '—'}</td>
+                                        <td style={{ ...s.td, fontSize: 7, color: '#6b7280' }}>{entry.payload_summary || '—'}</td>
                                     </tr>
                                 ))}
                             </tbody>
