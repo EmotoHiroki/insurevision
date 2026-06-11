@@ -31,15 +31,16 @@ function SmartphoneTokenConfirmContent() {
     const [errorMsg, setErrorMsg] = useState('')
 
     useEffect(() => {
+        const EXPIRED_MSG = 'URLが無効か期限切れです。募集人に再送付をご依頼ください。'
         if (!token) {
-            setErrorMsg('確認URLが無効です。募集人から受け取ったURLをご使用ください。')
+            setErrorMsg(EXPIRED_MSG)
             setPageState('error')
             return
         }
         const load = async () => {
             const res = await fetch(`/api/smartphone-confirm?token=${encodeURIComponent(token)}`)
             if (!res.ok) {
-                setErrorMsg('確認URLが無効です。募集人から受け取ったURLをご使用ください。')
+                setErrorMsg(EXPIRED_MSG)
                 setPageState('error')
                 return
             }
@@ -48,10 +49,10 @@ function SmartphoneTokenConfirmContent() {
             if (data.used) {
                 setPageState('already_used')
             } else if (data.expired) {
-                setErrorMsg('確認URLの有効期限が切れています。募集人に新しいURLの発行をご依頼ください。')
+                setErrorMsg(EXPIRED_MSG)
                 setPageState('error')
             } else if (!data.valid) {
-                setErrorMsg('確認URLが無効です。募集人から受け取ったURLをご使用ください。')
+                setErrorMsg(EXPIRED_MSG)
                 setPageState('error')
             } else {
                 setPageState('ready')
