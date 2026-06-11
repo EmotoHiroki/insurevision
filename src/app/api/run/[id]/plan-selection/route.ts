@@ -16,7 +16,11 @@ export async function POST(request: Request, { params }: { params: Promise<{ id:
         const { data: { user } } = await supabase.auth.getUser()
         if (!user) return Response.json({ error: 'unauthorized' }, { status: 401 })
 
-        const { data: run } = await supabase.from('run').select('id, run_status').eq('id', runId).single()
+        const { data: run } = await supabase
+            .from('run')
+            .select('id, run_status, recommended_candidate_id, decided_candidate_id, plan_diff_reason')
+            .eq('id', runId)
+            .single()
         if (!run) return Response.json({ error: 'run not found' }, { status: 404 })
         if (run.run_status !== 'draft' && run.run_status !== 'post_record_pending') {
             return Response.json({ error: 'run not editable' }, { status: 400 })
@@ -27,17 +31,26 @@ export async function POST(request: Request, { params }: { params: Promise<{ id:
         const events: { event_type: string; payload: Record<string, unknown> }[] = []
 
         if ('recommendedCandidateId' in body) {
-            updates.recommended_candidate_id = body.recommendedCandidateId ?? null
-            events.push({ event_type: 'recommended_plan_set', payload: { candidate_id: body.recommendedCandidateId } })
+            const newVal = body.recommendedCandidateId ?? null
+            updates.recommended_candidate_id = newVal
+            if (newVal !== (run.recommended_candidate_id ?? null)) {
+                events.push({ event_type: 'recommended_plan_set', payload: { candidate_id: newVal } })
+            }
         }
         if ('decidedCandidateId' in body) {
-            updates.decided_candidate_id = body.decidedCandidateId ?? null
-            events.push({ event_type: 'decided_plan_set', payload: { candidate_id: body.decidedCandidateId } })
+            const newVal = body.decidedCandidateId ?? null
+            updates.decided_candidate_id = newVal
+            if (newVal !== (run.decided_candidate_id ?? null)) {
+                events.push({ event_type: 'decided_plan_set', payload: { candidate_id: newVal } })
+            }
         }
         if ('planDiffReason' in body) {
-            updates.plan_diff_reason = body.planDiffReason ?? null
-            updates.plan_diff_reason_recorded_at = body.planDiffReason ? now : null
-            events.push({ event_type: 'plan_diff_reason_recorded', payload: { reason: body.planDiffReason, recorded_at: now } })
+            const newVal = body.planDiffReason ?? null
+            updates.plan_diff_reason = newVal
+            updates.plan_diff_reason_recorded_at = newVal ? now : null
+            if (newVal && newVal !== (run.plan_diff_reason ?? null)) {
+                events.push({ event_type: 'plan_diff_reason_recorded', payload: { reason: newVal, recorded_at: now } })
+            }
         }
 
         if (Object.keys(updates).length > 0) {

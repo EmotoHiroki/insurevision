@@ -274,6 +274,11 @@ export default function RunDetailPage() {
     const handleStartPresenting = async () => {
         if (!operator || !run) return
         if (run.compare_presented_at) return   // already presented
+        const activeCount = candidates.filter(c => c.status === 'active').length
+        if (activeCount === 0) {
+            showToast(locale === 'ja' ? '比較プランが1件以上必要です' : 'At least one active plan is required', 'error')
+            return
+        }
         setSaving(true)
         try {
             const supabase = createClient()

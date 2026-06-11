@@ -39,12 +39,23 @@ function CustomerSheetContent() {
     const consentStatus = run.electronic_consent_status as string | null
     const consentAt = run.electronic_consent_confirmed_at as string | null
 
+    const PRODUCT_LINE_LABELS: Record<string, string> = {
+        auto: '自動車保険', fire: '火災保険', life: '生命保険',
+        accident: '傷害保険', marine: '海上保険', liability: '賠償責任保険',
+    }
+
+    const allFlags = [
+        ...((snapshot?.missing_flags as Array<{ flag_key: string; label: string }>) ?? []),
+        ...((snapshot?.uncertain_flags as Array<{ flag_key: string; label: string }>) ?? []),
+    ]
+    const flagLabelMap = Object.fromEntries(allFlags.map(f => [f.flag_key, f.label]))
+
     return (
         <div style={s.root}>
             {/* Print button - hidden on print */}
             <div style={s.noPrint} className="print-hide">
                 <button onClick={() => window.print()} style={s.printBtn}>印刷 / PDF出力</button>
-                <button onClick={() => window.history.back()} style={s.backBtn}>戻る</button>
+                <button onClick={() => window.history.length > 1 ? window.history.back() : window.close()} style={s.backBtn}>戻る</button>
             </div>
 
             {/* ═══════════════════════════════════════════════════ */}
@@ -75,7 +86,7 @@ function CustomerSheetContent() {
                     <div style={s.infoGrid3}>
                         <div style={s.infoCell}>
                             <div style={s.label}>代理店名</div>
-                            <div style={s.value}>{String(run.agency_id ?? '')}</div>
+                            <div style={s.value}>{operator ? String(operator.agency_name ?? '') : String(run.agency_id ?? '')}</div>
                         </div>
                         <div style={s.infoCell}>
                             <div style={s.label}>募集人氏名</div>
@@ -109,7 +120,7 @@ function CustomerSheetContent() {
                         </div>
                         <div style={s.infoCell}>
                             <div style={s.label}>種目</div>
-                            <div style={s.value}>{String(run.product_line ?? '自動車保険')}</div>
+                            <div style={s.value}>{PRODUCT_LINE_LABELS[run.product_line as string] ?? String(run.product_line ?? '—')}</div>
                         </div>
                         <div style={s.infoCell}>
                             <div style={s.label}>契約種別</div>
@@ -164,7 +175,7 @@ function CustomerSheetContent() {
                                 <div style={{ marginTop: 6, background: '#fef2f2', border: '1px solid #fca5a5', borderRadius: 4, padding: '4px 8px' }}>
                                     <div style={{ fontSize: 8, fontWeight: 700, color: '#991b1b', marginBottom: 2 }}>特に検討すべき項目</div>
                                     {(snapshot.unresolved_items as string[]).map((item, i) => (
-                                        <div key={i} style={{ fontSize: 8, color: '#7f1d1d' }}>・{item}</div>
+                                        <div key={i} style={{ fontSize: 8, color: '#7f1d1d' }}>・{flagLabelMap[item] ?? item}</div>
                                     ))}
                                 </div>
                             )}
@@ -386,8 +397,8 @@ const s: Record<string, React.CSSProperties> = {
     printBtn: { padding: '8px 20px', background: '#1d4ed8', color: 'white', border: 'none', borderRadius: 6, cursor: 'pointer', fontSize: 13, fontWeight: 700 },
     backBtn: { padding: '8px 16px', background: 'white', color: '#374151', border: '1px solid #d1d5db', borderRadius: 6, cursor: 'pointer', fontSize: 13 },
     page: {
-        width: '210mm', minHeight: '297mm', background: 'white', margin: '0 auto 20px',
-        padding: '12mm 14mm', boxSizing: 'border-box', position: 'relative',
+        width: '210mm', height: '297mm', overflow: 'hidden', background: 'white', margin: '0 auto 20px',
+        padding: '10mm 12mm', boxSizing: 'border-box', position: 'relative',
         boxShadow: '0 2px 12px rgba(0,0,0,0.12)',
         pageBreakAfter: 'always',
     },

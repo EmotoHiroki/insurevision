@@ -45,11 +45,22 @@ function AgencyReportContent() {
     const printedAt = format(new Date(), 'yyyy年M月d日 HH:mm')
     const runRef = String(run.customer_ref ?? run.id ?? '')
 
+    const PRODUCT_LINE_LABELS: Record<string, string> = {
+        auto: '自動車保険', fire: '火災保険', life: '生命保険',
+        accident: '傷害保険', marine: '海上保険', liability: '賠償責任保険',
+    }
+
+    const allFlags = [
+        ...((snapshot?.missing_flags as Array<{ flag_key: string; label: string }>) ?? []),
+        ...((snapshot?.uncertain_flags as Array<{ flag_key: string; label: string }>) ?? []),
+    ]
+    const flagLabelMap = Object.fromEntries(allFlags.map(f => [f.flag_key, f.label]))
+
     return (
         <div style={s.root}>
             <div style={s.noPrint} className="print-hide">
                 <button onClick={() => window.print()} style={s.printBtn}>印刷 / PDF出力</button>
-                <button onClick={() => window.history.back()} style={s.backBtn}>戻る</button>
+                <button onClick={() => window.history.length > 1 ? window.history.back() : window.close()} style={s.backBtn}>戻る</button>
             </div>
 
             {/* ═══════════════════════════════════════════════════ */}
@@ -75,7 +86,7 @@ function AgencyReportContent() {
                         <div style={s.card}>
                             <div style={s.cardLabel}>顧客情報</div>
                             <div style={s.cardValue}>{String(run.customer_name ?? runRef)}</div>
-                            <div style={s.cardSub}>種目: {String(run.product_line ?? '自動車保険')}</div>
+                            <div style={s.cardSub}>種目: {PRODUCT_LINE_LABELS[run.product_line as string] ?? String(run.product_line ?? '—')}</div>
                             <div style={s.cardSub}>区分: {run.customer_type === 'corporate' ? '法人' : '個人'}</div>
                             <div style={s.cardSub}>契約種別: {run.run_type === 'renewal' ? '更新' : '新規'}</div>
                         </div>
@@ -151,7 +162,9 @@ function AgencyReportContent() {
                             <tr>
                                 <td style={{ ...s.td, fontWeight: 700, color: '#6b7280' }}>差異フラグ</td>
                                 <td style={s.td} colSpan={3}>
-                                    {planDiffExists ? (
+                                    {!recommendedCandidate && !decidedCandidate ? (
+                                        <span style={{ color: '#9ca3af' }}>未設定（判定対象外）</span>
+                                    ) : planDiffExists ? (
                                         <span style={{ color: '#d97706', fontWeight: 700 }}>
                                             差異あり - おすすめプランとお客様決定プランが異なります
                                         </span>
@@ -242,8 +255,8 @@ function AgencyReportContent() {
                             <div style={s.value}>{run.created_at ? format(new Date(run.created_at as string), 'yyyy年M月d日') : '—'}</div>
                         </div>
                         <div style={s.infoCell}>
-                            <div style={s.label}>代理店ID</div>
-                            <div style={s.value}>{String(run.agency_id ?? '—')}</div>
+                            <div style={s.label}>代理店名</div>
+                            <div style={s.value}>{operator ? String(operator.agency_name ?? '') : String(run.agency_id ?? '—')}</div>
                         </div>
                         <div style={s.infoCell}>
                             <div style={s.label}>記録方式（面談シーン）</div>
@@ -316,7 +329,7 @@ function AgencyReportContent() {
                             <div style={s.label}>未対応事項</div>
                             {snapshot && (snapshot.unresolved_items as string[]).length > 0 ? (
                                 (snapshot.unresolved_items as string[]).map((item, i) => (
-                                    <div key={i} style={{ fontSize: 8, color: '#dc2626' }}>・{item}</div>
+                                    <div key={i} style={{ fontSize: 8, color: '#dc2626' }}>・{flagLabelMap[item] ?? item}</div>
                                 ))
                             ) : (
                                 <div style={{ fontSize: 8, color: '#16a34a' }}>なし</div>
@@ -606,8 +619,8 @@ const s: Record<string, React.CSSProperties> = {
     printBtn: { padding: '8px 20px', background: '#374151', color: 'white', border: 'none', borderRadius: 6, cursor: 'pointer', fontSize: 13, fontWeight: 700 },
     backBtn: { padding: '8px 16px', background: 'white', color: '#374151', border: '1px solid #d1d5db', borderRadius: 6, cursor: 'pointer', fontSize: 13 },
     page: {
-        width: '210mm', minHeight: '297mm', background: 'white', margin: '0 auto 20px',
-        padding: '10mm 14mm', boxSizing: 'border-box', position: 'relative',
+        width: '210mm', height: '297mm', overflow: 'hidden', background: 'white', margin: '0 auto 20px',
+        padding: '8mm 12mm', boxSizing: 'border-box', position: 'relative',
         boxShadow: '0 2px 12px rgba(0,0,0,0.12)',
         pageBreakAfter: 'always',
     },
