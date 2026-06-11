@@ -412,13 +412,13 @@ function AgencyReportContent() {
                                 </td>
                             </tr>
                             <tr style={{ background: '#f9fafb' }}>
-                                <td style={s.td}>診断スナップショットの確定（凍結）</td>
+                                <td style={s.td}>案件確定（スナップショット凍結）</td>
                                 <td style={{ ...s.td, textAlign: 'center' }}>システム</td>
-                                <td style={{ ...s.td, textAlign: 'center', fontWeight: 700, color: run.snapshot_frozen ? '#15803d' : '#dc2626' }}>
-                                    {run.snapshot_frozen ? '○' : '✗'}
+                                <td style={{ ...s.td, textAlign: 'center', fontWeight: 700, color: run.finalized_at ? '#15803d' : '#dc2626' }}>
+                                    {run.finalized_at ? '○' : '✗'}
                                 </td>
                                 <td style={{ ...s.td, fontSize: 7 }}>
-                                    {run.snapshot_frozen_at ? format(new Date(run.snapshot_frozen_at as string), 'yyyy/M/d HH:mm') : '—'}
+                                    {run.finalized_at ? format(new Date(run.finalized_at as string), 'yyyy/M/d HH:mm') : '未確定'}
                                 </td>
                             </tr>
                             <tr>
