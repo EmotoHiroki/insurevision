@@ -246,6 +246,12 @@ function AgencyReportContent() {
                             <div style={s.value}>{String(run.agency_id ?? '—')}</div>
                         </div>
                         <div style={s.infoCell}>
+                            <div style={s.label}>記録方式（面談シーン）</div>
+                            <div style={s.value}>
+                                {{ visit_smartphone: '訪問・スマホ連携', visit_paper: '訪問・ペーパー確認', pc_tablet: 'PC/タブレット同席', telephone: '電話募集', web_meeting: 'WEB面談' }[run.meeting_scene as string] ?? String(run.meeting_scene ?? '未選択')}
+                            </div>
+                        </div>
+                        <div style={s.infoCell}>
                             <div style={s.label}>電子同意</div>
                             <div style={s.value}>
                                 {{ agreed: '同意あり', declined: '同意なし', face_confirmed: '面談確認済', not_recorded: '未記録' }[run.electronic_consent_status as string] ?? '—'}
@@ -260,6 +266,12 @@ function AgencyReportContent() {
                         <div style={s.infoCell}>
                             <div style={s.label}>スマホ確認</div>
                             <div style={s.value}>{String(run.smartphone_conf_status ?? '未使用')}</div>
+                        </div>
+                        <div style={s.infoCell}>
+                            <div style={s.label}>紙面確認</div>
+                            <div style={s.value}>
+                                {{ not_required: '不要', pending: '確認待ち', completed: '完了' }[run.paper_confirmation_status as string] ?? String(run.paper_confirmation_status ?? '—')}
+                            </div>
                         </div>
                     </div>
                 </div>
@@ -281,6 +293,12 @@ function AgencyReportContent() {
                         <div style={s.infoCell}>
                             <div style={s.label}>お客様決定プラン</div>
                             <div style={s.value}>{decidedCandidate ? `${String(decidedCandidate.insurer_name ?? '')} / ${String(decidedCandidate.product_name ?? '')}` : '未決定'}</div>
+                        </div>
+                        <div style={s.infoCell}>
+                            <div style={s.label}>新契約保険料（年額）</div>
+                            <div style={{ ...s.value, fontWeight: 700, color: '#1d4ed8' }}>
+                                {decidedCandidate?.annual_premium ? `¥${Number(decidedCandidate.annual_premium).toLocaleString()}` : '—'}
+                            </div>
                         </div>
                     </div>
                     {!!run.customer_intent_memo && (
