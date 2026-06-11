@@ -6,7 +6,7 @@ import { format } from 'date-fns'
 
 type QualityCheck = { label: string; pass: boolean; note: string }
 type TimelineEntry = { category: string; label: string; occurred_at: string; payload_summary: string }
-type AuditEvent = { id: string; event_type: string; occurred_at: string; metadata: Record<string, unknown> | null }
+type AuditEvent = { id: string; event_type: string; occurred_at: string; payload: Record<string, unknown> | null }
 
 type ReportData = {
     run: Record<string, unknown>
@@ -511,9 +511,9 @@ function AgencyReportContent() {
                                         </td>
                                         <td style={{ ...s.td, fontFamily: 'monospace', fontSize: 7, wordBreak: 'break-all' }}>
                                             <span style={{ fontWeight: 700, color: '#1d4ed8' }}>{ev.event_type}</span>
-                                            {ev.metadata && Object.keys(ev.metadata).length > 0 && (
+                                            {ev.payload && Object.keys(ev.payload).length > 0 && (
                                                 <span style={{ color: '#6b7280', marginLeft: 6 }}>
-                                                    {JSON.stringify(ev.metadata)}
+                                                    {JSON.stringify(ev.payload)}
                                                 </span>
                                             )}
                                         </td>
