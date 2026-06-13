@@ -23,8 +23,17 @@ export async function GET(request: Request, { params }: { params: Promise<{ id: 
         const { data: snapshot } = await supabase
             .from('snapshot').select('*').eq('run_id', runId).maybeSingle()
 
-        const { data: operator } = await supabase
+        const { data: operatorRow } = await supabase
             .from('operator').select('*').eq('id', run.operator_id).maybeSingle()
+
+        // agency_name lives on agency_config (keyed by agency_id), not on operator.
+        // Resolve it so print pages can show 代理店名 instead of a blank/UUID.
+        let operator = operatorRow
+        if (operatorRow) {
+            const { data: agency } = await supabase
+                .from('agency_config').select('agency_name').eq('agency_id', operatorRow.agency_id).maybeSingle()
+            operator = { ...operatorRow, agency_name: agency?.agency_name ?? null }
+        }
 
         // Resolve 3-axis candidates
         const candidateMap = Object.fromEntries((candidates || []).map(c => [c.id, c]))
