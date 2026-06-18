@@ -58,6 +58,8 @@ function AgencyReportContent() {
 
     return (
         <div style={s.root}>
+            {/* Last page must not force a trailing page-break (avoids blank final page) */}
+            <style>{`@media print { .ph-page:last-of-type { page-break-after: auto !important; } }`}</style>
             <div style={s.noPrint} className="print-hide">
                 <button onClick={() => window.print()} style={s.printBtn}>印刷 / PDF出力</button>
                 <button onClick={() => window.history.length > 1 ? window.history.back() : window.close()} style={s.backBtn}>戻る</button>
@@ -66,7 +68,7 @@ function AgencyReportContent() {
             {/* ═══════════════════════════════════════════════════ */}
             {/* PAGE 1 - 案件サマリー・3軸比較・差異・重点確認            */}
             {/* ═══════════════════════════════════════════════════ */}
-            <div style={s.page}>
+            <div style={s.page} className="ph-page">
                 <div style={s.docHeader}>
                     <div>
                         <div style={{ fontSize: 7, color: '#6b7280' }}>安心見える化™ - 社内管理用</div>
@@ -236,7 +238,7 @@ function AgencyReportContent() {
             {/* ═══════════════════════════════════════════════════ */}
             {/* PAGE 2 - 面談記録・業務品質チェック                      */}
             {/* ═══════════════════════════════════════════════════ */}
-            <div style={s.page}>
+            <div style={s.page} className="ph-page">
                 <div style={s.docHeader}>
                     <div style={{ fontSize: 13, fontWeight: 900 }}>代理店控え - 面談記録・業務品質チェック</div>
                     <div style={{ fontSize: 8, color: '#6b7280' }}>{runRef}</div>
@@ -389,7 +391,7 @@ function AgencyReportContent() {
             {/* ═══════════════════════════════════════════════════ */}
             {/* PAGE 3 - 重要事項確認内訳・重要証跡タイムライン             */}
             {/* ═══════════════════════════════════════════════════ */}
-            <div style={s.page}>
+            <div style={s.page} className="ph-page">
                 <div style={s.docHeader}>
                     <div style={{ fontSize: 13, fontWeight: 900 }}>代理店控え - 重要事項確認・証跡タイムライン（監査用）</div>
                     <div style={{ fontSize: 8, color: '#6b7280' }}>{runRef}</div>
@@ -514,7 +516,7 @@ function AgencyReportContent() {
             {/* ═══════════════════════════════════════════════════ */}
             {/* PAGE 4 - ログ原文全文テーブル                           */}
             {/* ═══════════════════════════════════════════════════ */}
-            <div style={s.page}>
+            <div style={s.page} className="ph-page">
                 <div style={s.docHeader}>
                     <div style={{ fontSize: 13, fontWeight: 900 }}>代理店控え - ログ原文全文（監査用）</div>
                     <div style={{ fontSize: 8, color: '#6b7280' }}>{runRef}</div>

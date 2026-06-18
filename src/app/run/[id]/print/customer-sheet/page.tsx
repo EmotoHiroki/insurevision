@@ -52,6 +52,8 @@ function CustomerSheetContent() {
 
     return (
         <div style={s.root}>
+            {/* Last page must not force a trailing page-break (avoids blank final page) */}
+            <style>{`@media print { .ph-page:last-of-type { page-break-after: auto !important; } }`}</style>
             {/* Print button - hidden on print */}
             <div style={s.noPrint} className="print-hide">
                 <button onClick={() => window.print()} style={s.printBtn}>印刷 / PDF出力</button>
@@ -61,7 +63,7 @@ function CustomerSheetContent() {
             {/* ═══════════════════════════════════════════════════ */}
             {/* PAGE 1 - 現契約の診断結果／意向把握                  */}
             {/* ═══════════════════════════════════════════════════ */}
-            <div style={s.page}>
+            <div style={s.page} className="ph-page">
                 {/* Header: consent status */}
                 <div style={{ ...s.consentBanner, background: consentStatus === 'agreed' ? '#f0fdf4' : '#fff7ed', borderColor: consentStatus === 'agreed' ? '#86efac' : '#fcd34d' }}>
                     <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
@@ -221,7 +223,7 @@ function CustomerSheetContent() {
             {/* ═══════════════════════════════════════════════════ */}
             {/* PAGE 2 - 比較・ご提案／ご選択・ご確認                 */}
             {/* ═══════════════════════════════════════════════════ */}
-            <div style={{ ...s.page, marginTop: 0 }}>
+            <div style={{ ...s.page, marginTop: 0 }} className="ph-page">
                 <div style={s.docTitle}>
                     <div style={{ fontSize: 14, fontWeight: 900, letterSpacing: '0.05em' }}>お客様シート</div>
                     <div style={{ fontSize: 8, color: '#6b7280', marginTop: 2 }}>比較・ご提案 ／ ご選択・ご確認</div>
