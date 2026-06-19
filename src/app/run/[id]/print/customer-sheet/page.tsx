@@ -51,9 +51,9 @@ function CustomerSheetContent() {
     const flagLabelMap = Object.fromEntries(allFlags.map(f => [f.flag_key, f.label]))
 
     return (
-        <div style={s.root}>
-            {/* Last page must not force a trailing page-break (avoids blank final page) */}
-            <style>{`@media print { .ph-page:last-of-type { page-break-after: auto !important; } }`}</style>
+        <div style={s.root} className="ph-root">
+            {/* Zero margins/padding in print so 2x297mm fits exactly on 2 pages */}
+            <style>{`@media print { .ph-root { padding: 0 !important; } .ph-page { margin: 0 !important; } .ph-page:last-of-type { page-break-after: auto !important; } }`}</style>
             {/* Print button - hidden on print */}
             <div style={s.noPrint} className="print-hide">
                 <button onClick={() => window.print()} style={s.printBtn}>印刷 / PDF出力</button>
