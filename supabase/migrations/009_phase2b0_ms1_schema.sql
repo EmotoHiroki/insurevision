@@ -57,7 +57,7 @@ VALUES
     ('property',       'モノ（財物）', 'Property',         true,  true,  2),
     ('liability',      '賠償責任',     'Liability',        true,  true,  3),
     ('person',         'ヒト',         'Person',           true,  true,  4),
-    ('profit_expense', '利益費用',     'Profit & Expense', false, true,  5)
+    ('profit_expense', '利益・費用',    'Profit & Expense', false, true,  5)
 ON CONFLICT (code) DO UPDATE SET
     label_ja            = EXCLUDED.label_ja,
     label_en            = EXCLUDED.label_en,

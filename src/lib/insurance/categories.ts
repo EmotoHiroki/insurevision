@@ -21,7 +21,7 @@ export const INSURANCE_CATEGORIES: readonly InsuranceCategoryDef[] = [
     { code: 'property',       labelJa: 'モノ（財物）', labelEn: 'Property',         supportsIndividual: true,  supportsCorporate: true, sortOrder: 2 },
     { code: 'liability',      labelJa: '賠償責任',     labelEn: 'Liability',        supportsIndividual: true,  supportsCorporate: true, sortOrder: 3 },
     { code: 'person',         labelJa: 'ヒト',         labelEn: 'Person',           supportsIndividual: true,  supportsCorporate: true, sortOrder: 4 },
-    { code: 'profit_expense', labelJa: '利益費用',     labelEn: 'Profit & Expense', supportsIndividual: false, supportsCorporate: true, sortOrder: 5 },
+    { code: 'profit_expense', labelJa: '利益・費用',    labelEn: 'Profit & Expense', supportsIndividual: false, supportsCorporate: true, sortOrder: 5 },
 ] as const
 
 const BY_CODE: Record<InsuranceCategoryCode, InsuranceCategoryDef> =
