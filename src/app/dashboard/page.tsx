@@ -4,7 +4,8 @@ import { useEffect, useState, useCallback } from 'react'
 import { useRouter } from 'next/navigation'
 import { createClient } from '@/lib/supabase/client'
 import { useLocale } from '@/lib/locale-context'
-import type { Run, Operator } from '@/lib/types'
+import type { Run, Operator, CasePhase } from '@/lib/types'
+import { categoryLabel } from '@/lib/insurance/categories'
 import { format } from 'date-fns'
 import {
     LuShield, LuGlobe, LuLogOut, LuPlus, LuChevronRight,
@@ -18,6 +19,7 @@ export default function DashboardPage() {
     const [operator, setOperator] = useState<Operator | null>(null)
     const [loading, setLoading] = useState(true)
     const [statusFilter, setStatusFilter] = useState<string>('all')
+    const [phaseFilter, setPhaseFilter] = useState<string>('all')
 
     const loadData = useCallback(async () => {
         setLoading(true)
@@ -49,9 +51,19 @@ export default function DashboardPage() {
         router.refresh()
     }
 
-    const filteredRuns = statusFilter === 'all'
-        ? runs
-        : runs.filter(r => r.run_status === statusFilter)
+    const filteredRuns = runs.filter(r =>
+        (statusFilter === 'all' || r.run_status === statusFilter) &&
+        (phaseFilter === 'all' || (r.case_phase ?? 'preparing') === phaseFilter),
+    )
+
+    // Phase2-b-0: 案件フェーズ（準備済 / 面談中 / 完了）
+    const casePhaseMeta: Record<CasePhase, { ja: string; en: string; color: string }> = {
+        preparing:  { ja: '準備済', en: 'Preparing',  color: 'var(--status-draft)' },
+        in_meeting: { ja: '面談中', en: 'In meeting', color: 'var(--info)' },
+        completed:  { ja: '完了',   en: 'Completed',  color: 'var(--status-finalized)' },
+    }
+    const casePhaseLabel = (phase: CasePhase) =>
+        locale === 'ja' ? casePhaseMeta[phase].ja : casePhaseMeta[phase].en
 
     const counts = {
         draft: runs.filter(r => r.run_status === 'draft').length,
@@ -177,6 +189,28 @@ export default function DashboardPage() {
                     ))}
                 </div>
 
+                {/* Phase2-b-0: 案件フェーズ フィルタ */}
+                <div style={{ display: 'flex', gap: 8, marginBottom: 16, alignItems: 'center' }}>
+                    <span style={{ fontSize: 12, color: 'var(--text-secondary)', marginRight: 4 }}>
+                        {locale === 'ja' ? '案件フェーズ' : 'Case phase'}
+                    </span>
+                    {(['all', 'preparing', 'in_meeting', 'completed'] as const).map(p => (
+                        <button
+                            key={p}
+                            onClick={() => setPhaseFilter(p)}
+                            style={{
+                                padding: '5px 14px', borderRadius: 20, border: 'none', fontSize: 12, fontWeight: 500,
+                                cursor: 'pointer', transition: '0.2s',
+                                background: phaseFilter === p ? 'var(--primary)' : 'white',
+                                color: phaseFilter === p ? 'white' : 'var(--text-secondary)',
+                                boxShadow: phaseFilter === p ? '0 2px 8px rgba(26,35,126,0.25)' : '0 1px 3px rgba(0,0,0,0.06)',
+                            }}
+                        >
+                            {p === 'all' ? t('all') : casePhaseLabel(p)}
+                        </button>
+                    ))}
+                </div>
+
                 {/* Table */}
                 <div style={{
                     background: 'white', borderRadius: 12,
@@ -196,6 +230,8 @@ export default function DashboardPage() {
                             <thead>
                                 <tr>
                                     <th>{t('status')}</th>
+                                    <th>{locale === 'ja' ? '案件フェーズ' : 'Phase'}</th>
+                                    <th>{locale === 'ja' ? '種目' : 'Category'}</th>
                                     <th>{t('customerRef')}</th>
                                     <th>{t('customerType')}</th>
                                     <th>{t('runType')}</th>
@@ -213,6 +249,25 @@ export default function DashboardPage() {
                                             }}>
                                                 {statusLabel(run.run_status)}
                                             </span>
+                                        </td>
+                                        <td>
+                                            {(() => {
+                                                const phase = (run.case_phase ?? 'preparing') as CasePhase
+                                                return (
+                                                    <span style={{
+                                                        padding: '4px 10px', borderRadius: 12, fontSize: 12, fontWeight: 600,
+                                                        background: `${casePhaseMeta[phase].color}18`,
+                                                        color: casePhaseMeta[phase].color,
+                                                    }}>
+                                                        {casePhaseLabel(phase)}
+                                                    </span>
+                                                )
+                                            })()}
+                                        </td>
+                                        <td style={{ fontSize: 13 }}>
+                                            {run.insurance_category_code
+                                                ? categoryLabel(run.insurance_category_code, locale)
+                                                : '—'}
                                         </td>
                                         <td style={{ fontWeight: 500 }}>{run.customer_ref}</td>
                                         <td>{run.customer_type === 'individual' ? t('individual') : t('corporate')}</td>

@@ -33,6 +33,46 @@ export type CustomerDecision =
     | 'information_refused'
     | 'comparison_waived'
 
+// =============================================
+// Phase2-b-0 (MS1): 種目横断共通基盤
+// =============================================
+
+// 上位5分類コード（insurance_category テーブル）
+export type InsuranceCategoryCode =
+    | 'auto'            // 自動車（Phase2-a）
+    | 'property'        // モノ（財物）— 火災・機械・動産総合等を収容
+    | 'liability'       // 賠償責任（b-2）
+    | 'person'          // ヒト — 傷害・医療・所得補償等を収容（b-3）
+    | 'profit_expense'  // 利益費用（b-4）
+
+// 実種目コード（insurance_line テーブル）— b0-MS1 では auto/fire のみ
+export type InsuranceLineCode =
+    | 'auto'   // 自動車（category: auto）
+    | 'fire'   // 火災（category: property）
+
+// 契約フロー種別（田島 2026-06-23 の3分類）
+export type ContractFlowType =
+    | 'new_complete'   // 完全新規（顧客も契約もゼロ）
+    | 'new_existing'   // 新規-既存顧客（顧客あり・契約新規）
+    | 'renewal'        // 継続更改（現契約あり）
+
+// 診断基点
+export type DiagnosisBaseline =
+    | 'contract_diff'        // 現契約との差分（継続更改の既定）
+    | 'ideal_coverage_diff'  // あるべき補償像との差分（完全新規）
+
+// 案件フェーズ（ダッシュボード用。run_status とは独立）
+export type CasePhase =
+    | 'preparing'   // 準備済
+    | 'in_meeting'  // 面談中
+    | 'completed'   // 完了
+
+// 補償ティア（3段階分類）
+export type CoverageTier =
+    | 'standard_required'  // 標準必要
+    | 'needs_check'        // 要確認
+    | 'optional_excluded'  // 任意・対象外
+
 // Phase2-a: G-28 面談シーンプリセット（5種）
 export type MeetingScene =
     | 'visit_smartphone'  // 訪問・スマホ連携
@@ -108,6 +148,16 @@ export type AuditEventType =
     | 'decided_plan_set'                // MS3: 決定プラン設定
     | 'plan_diff_reason_recorded'       // MS3: 差異理由記録
     | 'agency_report_generated'         // MS3: 代理店控え生成
+    // Phase2-b-0: 種目横断共通イベント
+    | 'insurance_category_selected'     // 上位5分類の選択
+    | 'insurance_line_selected'         // 実種目（fire 等）の選択
+    | 'contract_flow_selected'          // 契約フロー種別選択
+    | 'case_phase_changed'              // 案件フェーズ遷移
+    | 'property_profile_recorded'       // 対象物件プロファイル記録
+    | 'ideal_coverage_diagnosed'        // あるべき補償像との差分診断
+    | 'intent_inferred'                 // 推定意向の確定
+    | 'intent_finalized'                // 最終意向の確定・合致確認
+    | 'coverage_overlap_checked'        // 補償重複の確認
 
 // =============================================
 // Table Interfaces
@@ -201,6 +251,12 @@ export interface Run {
     important_matters_delivery_method: ImportantMattersDeliveryMethod | null
     // Phase2-a: canNext制御
     can_next_blocked_reasons: string[]
+    // Phase2-b-0: 種目横断共通基盤
+    insurance_category_code: InsuranceCategoryCode | null
+    insurance_line_code: InsuranceLineCode | null
+    contract_flow_type: ContractFlowType | null
+    diagnosis_baseline: DiagnosisBaseline | null
+    case_phase: CasePhase
     // MS3: 推奨・決定プラン + 差異理由
     recommended_candidate_id: string | null
     decided_candidate_id: string | null
@@ -288,6 +344,88 @@ export interface AgencyConfig {
     id: string
     agency_id: string
     agency_name: string
+    created_at: string
+    updated_at: string
+}
+
+// =============================================
+// Phase2-b-0 (MS1): Table Interfaces
+// =============================================
+
+export interface InsuranceCategory {
+    code: InsuranceCategoryCode
+    label_ja: string
+    label_en: string
+    supports_individual: boolean
+    supports_corporate: boolean
+    is_active: boolean
+    sort_order: number
+    created_at: string
+    updated_at: string
+}
+
+export interface InsuranceLine {
+    code: InsuranceLineCode
+    category_code: InsuranceCategoryCode
+    label_ja: string
+    label_en: string
+    milestone: string
+    supports_individual: boolean
+    supports_corporate: boolean
+    is_implemented: boolean
+    is_active: boolean
+    sort_order: number
+    created_at: string
+    updated_at: string
+}
+
+export interface PropertyProfile {
+    id: string
+    run_id: string
+    line_code: InsuranceLineCode
+    municipality_code: string | null
+    attributes: Record<string, unknown>
+    created_at: string
+    updated_at: string
+}
+
+export interface CoverageRuleMaster {
+    id: string
+    line_code: InsuranceLineCode
+    coverage_code: string
+    coverage_label_ja: string
+    condition: Record<string, unknown>     // 物件属性へのマッチ条件（空 {} は無条件）
+    tier: CoverageTier
+    intent_dependent: boolean
+    note: string | null
+    sort_order: number
+    is_active: boolean
+    created_at: string
+    updated_at: string
+}
+
+export interface FloodZoneMaster {
+    municipality_code: string
+    prefecture: string
+    municipality_name: string
+    flood_grade: number                    // 1-5
+    source: string
+    effective_from: string | null
+    created_at: string
+    updated_at: string
+}
+
+export interface IntentConfirmation {
+    id: string
+    run_id: string
+    inferred_intent: Record<string, unknown>
+    final_intent: Record<string, unknown>
+    match_confirmed: boolean | null
+    discrepancy_note: string | null
+    overlap_check: Record<string, unknown>
+    regulatory_basis: string
+    confirmed_at: string | null
+    confirmed_by: string | null
     created_at: string
     updated_at: string
 }
