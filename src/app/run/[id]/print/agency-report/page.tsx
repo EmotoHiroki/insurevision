@@ -3,6 +3,9 @@
 import { useEffect, useState, Suspense } from 'react'
 import { useParams } from 'next/navigation'
 import { format } from 'date-fns'
+import { lineLabel } from '@/lib/insurance/lines'
+import { categoryLabel } from '@/lib/insurance/categories'
+import type { InsuranceLineCode, InsuranceCategoryCode } from '@/lib/types'
 
 type QualityCheck = { label: string; pass: boolean; note: string }
 type TimelineEntry = { category: string; label: string; occurred_at: string; payload_summary: string }
@@ -45,10 +48,13 @@ function AgencyReportContent() {
     const printedAt = format(new Date(), 'yyyy年M月d日 HH:mm')
     const runRef = String(run.customer_ref ?? run.id ?? '')
 
-    const PRODUCT_LINE_LABELS: Record<string, string> = {
-        auto: '自動車保険', fire: '火災保険', life: '生命保険',
-        accident: '傷害保険', marine: '海上保険', liability: '賠償責任保険',
-    }
+    const lineDisplay = (() => {
+        const lc = run.insurance_line_code as InsuranceLineCode | null
+        const cc = run.insurance_category_code as InsuranceCategoryCode | null
+        if (lc) return lineLabel(lc) + '保険'
+        if (cc) return categoryLabel(cc)
+        return '—'
+    })()
 
     const allFlags = [
         ...((snapshot?.missing_flags as Array<{ flag_key: string; label: string }>) ?? []),
@@ -88,7 +94,7 @@ function AgencyReportContent() {
                         <div style={s.card}>
                             <div style={s.cardLabel}>顧客情報</div>
                             <div style={s.cardValue}>{String(run.customer_name ?? runRef)}</div>
-                            <div style={s.cardSub}>種目: {PRODUCT_LINE_LABELS[run.product_line as string] ?? String(run.product_line ?? '—')}</div>
+                            <div style={s.cardSub}>種目: {lineDisplay}</div>
                             <div style={s.cardSub}>区分: {run.customer_type === 'corporate' ? '法人' : '個人'}</div>
                             <div style={s.cardSub}>契約種別: {run.run_type === 'renewal' ? '更新' : '新規'}</div>
                         </div>

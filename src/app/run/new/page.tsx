@@ -127,7 +127,9 @@ export default function NewRunPage() {
             const { data: run, error: runErr } = await supabase.from('run').insert({
                 agency_id: op.agency_id,
                 operator_id: op.id,
-                product_line: 'auto',   // Phase 2: make configurable
+                product_line: 'auto',           // legacy field — kept for DB compat
+                insurance_category_code: 'auto', // b0-MS1: 種目選択UI実装まで固定
+                insurance_line_code: 'auto',     // b0-MS1: 種目選択UI実装まで固定
                 customer_type: customerType,
                 customer_ref: customerRef.trim(),
                 customer_name: customerName.trim() || null,

@@ -3,6 +3,9 @@
 import { useEffect, useState, Suspense } from 'react'
 import { useParams } from 'next/navigation'
 import { format } from 'date-fns'
+import { lineLabel } from '@/lib/insurance/lines'
+import { categoryLabel } from '@/lib/insurance/categories'
+import type { InsuranceLineCode, InsuranceCategoryCode } from '@/lib/types'
 
 type ReportData = {
     run: Record<string, unknown>
@@ -39,10 +42,13 @@ function CustomerSheetContent() {
     const consentStatus = run.electronic_consent_status as string | null
     const consentAt = run.electronic_consent_confirmed_at as string | null
 
-    const PRODUCT_LINE_LABELS: Record<string, string> = {
-        auto: '自動車保険', fire: '火災保険', life: '生命保険',
-        accident: '傷害保険', marine: '海上保険', liability: '賠償責任保険',
-    }
+    const lineDisplay = (() => {
+        const lc = run.insurance_line_code as InsuranceLineCode | null
+        const cc = run.insurance_category_code as InsuranceCategoryCode | null
+        if (lc) return lineLabel(lc) + '保険'
+        if (cc) return categoryLabel(cc)
+        return '—'
+    })()
 
     const allFlags = [
         ...((snapshot?.missing_flags as Array<{ flag_key: string; label: string }>) ?? []),
@@ -122,7 +128,7 @@ function CustomerSheetContent() {
                         </div>
                         <div style={s.infoCell}>
                             <div style={s.label}>種目</div>
-                            <div style={s.value}>{PRODUCT_LINE_LABELS[run.product_line as string] ?? String(run.product_line ?? '—')}</div>
+                            <div style={s.value}>{lineDisplay}</div>
                         </div>
                         <div style={s.infoCell}>
                             <div style={s.label}>契約種別</div>

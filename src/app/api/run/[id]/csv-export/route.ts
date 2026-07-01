@@ -40,6 +40,12 @@ export async function GET(request: Request, { params }: { params: Promise<{ id: 
     }
 }
 
+// 種目表示名マップ（insurance_line テーブルと同期）
+const LINE_LABEL_JA: Record<string, string> = {
+    auto: '自動車保険',
+    fire: '火災保険',
+}
+
 // ── CSV field definitions (A-3: 骨格) ────────────────────────────────────────
 // Structure: section | field_name | value | note
 // Designed to be extensible: plan rows are dynamic (not hardcoded to 4)
@@ -56,7 +62,10 @@ function buildCsvRows(
         ['案件基本情報', 'customer_name',    String(run.customer_name ?? ''), ''],
         ['案件基本情報', 'customer_type',    String(run.customer_type ?? ''), 'individual/corporate'],
         ['案件基本情報', 'run_type',         String(run.run_type ?? ''), 'new_contract/renewal'],
-        ['案件基本情報', 'product_line',     String(run.product_line ?? ''), '種目（自動車等）'],
+        ['案件基本情報', 'insurance_line_code',  String(run.insurance_line_code ?? ''), '種目コード（b0-MS1以降）'],
+        ['案件基本情報', 'insurance_line_label', LINE_LABEL_JA[String(run.insurance_line_code ?? '')] ?? String(run.insurance_line_code ?? ''), '種目表示名'],
+        ['案件基本情報', 'insurance_category_code', String(run.insurance_category_code ?? ''), '上位5分類コード'],
+        ['案件基本情報', 'product_line',      String(run.product_line ?? ''), '旧フィールド（b-1以降は非推奨）'],
         ['案件基本情報', 'meeting_scene',    String(run.meeting_scene ?? ''), '面談シーン'],
         ['案件基本情報', 'run_status',       String(run.run_status ?? ''), ''],
         ['案件基本情報', 'created_at',       String(run.created_at ?? ''), ''],
@@ -104,7 +113,7 @@ function buildCsvRows(
 
     // ── 注記 (A-3 scope) ──
     rows.push(['注記', 'scope', 'MS3骨格: フィールド定義・出力形式のみ', '全項目完全マッピング・取込処理はPhase2-b'])
-    rows.push(['注記', 'product_line_note', '自動車版（MS3）', '他種目展開はPhase2-b以降'])
+    rows.push(['注記', 'insurance_line_note', 'insurance_line_code が正式な種目フィールド（b0-MS1以降）', 'product_lineは旧フィールドで非推奨'])
 
     return rows
 }
