@@ -22,7 +22,7 @@ export async function middleware(request: NextRequest) {
     }
 
     const authHeader = request.headers.get('authorization') ?? ''
-    const expected = 'Basic ' + Buffer.from(`${basicUser}:${basicPass}`).toString('base64')
+    const expected = 'Basic ' + btoa(`${basicUser}:${basicPass}`)
     const valid = safeEqual(authHeader, expected)
 
     if (!valid) {

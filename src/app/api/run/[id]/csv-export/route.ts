@@ -46,6 +46,15 @@ const LINE_LABEL_JA: Record<string, string> = {
     fire: '火災保険',
 }
 
+// 上位5分類表示名マップ（insurance_category テーブルと同期）
+const CATEGORY_LABEL_JA: Record<string, string> = {
+    auto: '自動車',
+    property: '財物',
+    liability: '賠償責任',
+    person: '人',
+    profit_expense: '利益・費用',
+}
+
 // ── CSV field definitions (A-3: 骨格) ────────────────────────────────────────
 // Structure: section | field_name | value | note
 // Designed to be extensible: plan rows are dynamic (not hardcoded to 4)
@@ -64,8 +73,9 @@ function buildCsvRows(
         ['案件基本情報', 'run_type',         String(run.run_type ?? ''), 'new_contract/renewal'],
         ['案件基本情報', 'insurance_line_code',  String(run.insurance_line_code ?? ''), '種目コード（b0-MS1以降）'],
         ['案件基本情報', 'insurance_line_label', LINE_LABEL_JA[String(run.insurance_line_code ?? '')] ?? String(run.insurance_line_code ?? ''), '種目表示名'],
-        ['案件基本情報', 'insurance_category_code', String(run.insurance_category_code ?? ''), '上位5分類コード'],
-        ['案件基本情報', 'product_line',      String(run.product_line ?? ''), '旧フィールド（b-1以降は非推奨）'],
+        ['案件基本情報', 'insurance_category_code',  String(run.insurance_category_code ?? ''), '上位5分類コード'],
+        ['案件基本情報', 'insurance_category_label', CATEGORY_LABEL_JA[String(run.insurance_category_code ?? '')] ?? String(run.insurance_category_code ?? ''), '上位5分類表示名'],
+        ['案件基本情報', 'product_line',       String(run.product_line ?? ''), '旧フィールド（b-1以降は非推奨）'],
         ['案件基本情報', 'meeting_scene',    String(run.meeting_scene ?? ''), '面談シーン'],
         ['案件基本情報', 'run_status',       String(run.run_status ?? ''), ''],
         ['案件基本情報', 'created_at',       String(run.created_at ?? ''), ''],
