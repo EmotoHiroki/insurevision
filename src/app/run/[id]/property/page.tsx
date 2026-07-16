@@ -5,6 +5,7 @@
 // =============================================
 // 個人/企業を1機能内で切り替える統合方針（田島 2026-07-07正式化案 §1）に基づく入力スケルトン。
 // b1-MS1範囲: 入力・保存・水災等地の静的参照まで。診断ロジック・比較・canNext接続はb1-MS2。
+// 未回答/はい/いいえの三値管理（田島 2026-07-16指摘反映）。既定値による補完は行わない。
 
 import { useEffect, useState } from 'react'
 import { useParams, useRouter } from 'next/navigation'
@@ -168,6 +169,44 @@ export default function PropertyProfilePage() {
     )
 }
 
+// ─────────────────────────────────────────────
+// TriToggle — 未回答/はい/いいえ の三値トグル
+// null=未回答 を既定値による補完なしで明示的に区別する（田島 2026-07-16指摘）
+// ─────────────────────────────────────────────
+function TriToggle({ label, value, onChange, locale }: {
+    label: string
+    value: boolean | null
+    onChange: (v: boolean | null) => void
+    locale: 'ja' | 'en'
+}) {
+    const options: { v: boolean | null; labelJa: string; labelEn: string }[] = [
+        { v: null, labelJa: '未回答', labelEn: 'Unanswered' },
+        { v: true, labelJa: 'はい', labelEn: 'Yes' },
+        { v: false, labelJa: 'いいえ', labelEn: 'No' },
+    ]
+    return (
+        <div>
+            <label className="form-label">{label}</label>
+            <div className="grid grid-cols-3 gap-2 mt-2">
+                {options.map(o => (
+                    <label
+                        key={String(o.v)}
+                        className={`radio-card cursor-pointer text-center text-sm ${value === o.v ? 'ring-2 ring-blue-500' : ''}`}
+                    >
+                        <input
+                            type="radio"
+                            className="sr-only"
+                            checked={value === o.v}
+                            onChange={() => onChange(o.v)}
+                        />
+                        <span className="font-medium">{locale === 'ja' ? o.labelJa : o.labelEn}</span>
+                    </label>
+                ))}
+            </div>
+        </div>
+    )
+}
+
 function IndividualForm({ attrs, onChange, locale }: {
     attrs: IndividualPropertyAttributes
     onChange: (a: PropertyAttributes) => void
@@ -194,6 +233,9 @@ function IndividualForm({ attrs, onChange, locale }: {
                         </label>
                     ))}
                 </div>
+                {attrs.ownership_type === null && (
+                    <p className="text-xs text-gray-400 mt-1">{locale === 'ja' ? '未回答' : 'Unanswered'}</p>
+                )}
             </div>
 
             <div>
@@ -209,31 +251,35 @@ function IndividualForm({ attrs, onChange, locale }: {
                     onChange={e => set('floor_area_sqm', e.target.value ? Number(e.target.value) : null)} />
             </div>
 
-            <label className="flex items-center gap-3 cursor-pointer">
-                <input type="checkbox" checked={attrs.has_household_goods} className="w-4 h-4 rounded"
-                    onChange={e => set('has_household_goods', e.target.checked)} />
-                <span className="text-sm text-gray-700">{locale === 'ja' ? '家財を含む' : 'Includes household goods'}</span>
-            </label>
+            <TriToggle
+                label={locale === 'ja' ? '家財を含む' : 'Includes household goods'}
+                value={attrs.has_household_goods}
+                onChange={v => set('has_household_goods', v)}
+                locale={locale}
+            />
 
-            <label className="flex items-center gap-3 cursor-pointer">
-                <input type="checkbox" checked={attrs.earthquake_insurance} className="w-4 h-4 rounded"
-                    onChange={e => set('earthquake_insurance', e.target.checked)} />
-                <span className="text-sm text-gray-700">{locale === 'ja' ? '地震保険を付帯' : 'Earthquake insurance rider'}</span>
-            </label>
+            <TriToggle
+                label={locale === 'ja' ? '地震保険を付帯' : 'Earthquake insurance rider'}
+                value={attrs.earthquake_insurance}
+                onChange={v => set('earthquake_insurance', v)}
+                locale={locale}
+            />
 
             {attrs.ownership_type === 'rental' && (
-                <div className="pt-3 border-t border-gray-100 space-y-3">
+                <div className="pt-3 border-t border-gray-100 space-y-4">
                     <p className="text-xs font-medium text-gray-500">{locale === 'ja' ? '賃貸のみ' : 'Rental only'}</p>
-                    <label className="flex items-center gap-3 cursor-pointer">
-                        <input type="checkbox" checked={attrs.renter_liability ?? false} className="w-4 h-4 rounded"
-                            onChange={e => set('renter_liability', e.target.checked)} />
-                        <span className="text-sm text-gray-700">{locale === 'ja' ? '借家人賠償' : 'Renter liability'}</span>
-                    </label>
-                    <label className="flex items-center gap-3 cursor-pointer">
-                        <input type="checkbox" checked={attrs.personal_liability ?? false} className="w-4 h-4 rounded"
-                            onChange={e => set('personal_liability', e.target.checked)} />
-                        <span className="text-sm text-gray-700">{locale === 'ja' ? '個人賠償' : 'Personal liability'}</span>
-                    </label>
+                    <TriToggle
+                        label={locale === 'ja' ? '借家人賠償' : 'Renter liability'}
+                        value={attrs.renter_liability}
+                        onChange={v => set('renter_liability', v)}
+                        locale={locale}
+                    />
+                    <TriToggle
+                        label={locale === 'ja' ? '個人賠償' : 'Personal liability'}
+                        value={attrs.personal_liability}
+                        onChange={v => set('personal_liability', v)}
+                        locale={locale}
+                    />
                 </div>
             )}
         </div>
@@ -256,8 +302,9 @@ function CorporateForm({ attrs, onChange, locale }: {
 
             <div>
                 <label className="form-label">{locale === 'ja' ? '物件数' : 'Property count'}</label>
-                <input type="number" min={1} className="form-input" value={attrs.property_count}
-                    onChange={e => set('property_count', Math.max(1, Number(e.target.value) || 1))} />
+                <input type="number" min={1} className="form-input" value={attrs.property_count ?? ''}
+                    placeholder={locale === 'ja' ? '未回答' : 'Unanswered'}
+                    onChange={e => set('property_count', e.target.value ? Math.max(1, Number(e.target.value)) : null)} />
             </div>
 
             <div>
@@ -272,23 +319,25 @@ function CorporateForm({ attrs, onChange, locale }: {
                     onChange={e => set('floor_area_sqm_total', e.target.value ? Number(e.target.value) : null)} />
             </div>
 
-            {attrs.property_count > 1 && (
-                <div className="pt-3 border-t border-gray-100 space-y-3">
+            {attrs.property_count !== null && attrs.property_count > 1 && (
+                <div className="pt-3 border-t border-gray-100 space-y-4">
                     <p className="text-xs text-gray-500">
                         {locale === 'ja'
                             ? '支払限度額・免責金額等は「別紙明細のとおり」とし、本ツール内では入力しません。'
                             : 'Payment limits / deductibles follow the separate itemized schedule and are not entered here.'}
                     </p>
-                    <label className="flex items-center gap-3 cursor-pointer">
-                        <input type="checkbox" checked={attrs.schedule_reference} className="w-4 h-4 rounded"
-                            onChange={e => set('schedule_reference', e.target.checked)} />
-                        <span className="text-sm text-gray-700">{locale === 'ja' ? '別紙明細を参照する' : 'References separate schedule'}</span>
-                    </label>
-                    <label className="flex items-center gap-3 cursor-pointer">
-                        <input type="checkbox" checked={attrs.schedule_acknowledged} className="w-4 h-4 rounded"
-                            onChange={e => set('schedule_acknowledged', e.target.checked)} />
-                        <span className="text-sm text-gray-700">{locale === 'ja' ? '別紙明細書の受領・了知を確認済み' : 'Schedule received & acknowledged'}</span>
-                    </label>
+                    <TriToggle
+                        label={locale === 'ja' ? '別紙明細を参照する' : 'References separate schedule'}
+                        value={attrs.schedule_reference}
+                        onChange={v => set('schedule_reference', v)}
+                        locale={locale}
+                    />
+                    <TriToggle
+                        label={locale === 'ja' ? '別紙明細書の受領・了知を確認済み' : 'Schedule received & acknowledged'}
+                        value={attrs.schedule_acknowledged}
+                        onChange={v => set('schedule_acknowledged', v)}
+                        locale={locale}
+                    />
                 </div>
             )}
         </div>
