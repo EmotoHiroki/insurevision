@@ -11,6 +11,7 @@ import {
     emptyPropertyAttributes,
     isPropertyProfileComplete,
     isIndividualAttributes,
+    deriveScheduleReference,
     type IndividualPropertyAttributes,
     type CorporatePropertyAttributes,
 } from '@/lib/insurance/property'
@@ -175,6 +176,24 @@ describe('property profile completeness (Fail-Closed 最小条件・田島 2026-
 
         const complete: CorporatePropertyAttributes = { ...incomplete, schedule_acknowledged: true }
         expect(isPropertyProfileComplete('corporate', complete)).toBe(true)
+    })
+
+    it('corporate multi-site with schedule_reference=false is incomplete even if acknowledged (contradiction guard, 田島 2026-07-16)', () => {
+        const contradictory: CorporatePropertyAttributes = {
+            property_count: 2,
+            building_structure: null,
+            floor_area_sqm_total: null,
+            schedule_reference: false,
+            schedule_acknowledged: true,
+        }
+        expect(isPropertyProfileComplete('corporate', contradictory)).toBe(false)
+    })
+
+    it('deriveScheduleReference: multi-property implies true, single/unanswered stays not-applicable (null)', () => {
+        expect(deriveScheduleReference(2)).toBe(true)
+        expect(deriveScheduleReference(5)).toBe(true)
+        expect(deriveScheduleReference(1)).toBeNull()
+        expect(deriveScheduleReference(null)).toBeNull()
     })
 
     it('mismatched customer_type/attribute shape is not complete', () => {

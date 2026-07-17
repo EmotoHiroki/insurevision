@@ -15,6 +15,7 @@ import { useLocale } from '@/lib/locale-context'
 import {
     OWNERSHIP_TYPES, ownershipTypeLabel, floodRiskLabel,
     emptyPropertyAttributes, isPropertyProfileComplete, isIndividualAttributes,
+    deriveScheduleReference,
     type OwnershipType, type PropertyAttributes,
     type IndividualPropertyAttributes, type CorporatePropertyAttributes,
 } from '@/lib/insurance/property'
@@ -304,7 +305,10 @@ function CorporateForm({ attrs, onChange, locale }: {
                 <label className="form-label">{locale === 'ja' ? '物件数' : 'Property count'}</label>
                 <input type="number" min={1} className="form-input" value={attrs.property_count ?? ''}
                     placeholder={locale === 'ja' ? '未回答' : 'Unanswered'}
-                    onChange={e => set('property_count', e.target.value ? Math.max(1, Number(e.target.value)) : null)} />
+                    onChange={e => {
+                        const count = e.target.value ? Math.max(1, Number(e.target.value)) : null
+                        onChange({ ...attrs, property_count: count, schedule_reference: deriveScheduleReference(count) })
+                    }} />
             </div>
 
             <div>
@@ -323,15 +327,9 @@ function CorporateForm({ attrs, onChange, locale }: {
                 <div className="pt-3 border-t border-gray-100 space-y-4">
                     <p className="text-xs text-gray-500">
                         {locale === 'ja'
-                            ? '支払限度額・免責金額等は「別紙明細のとおり」とし、本ツール内では入力しません。'
-                            : 'Payment limits / deductibles follow the separate itemized schedule and are not entered here.'}
+                            ? '支払限度額・免責金額等は「別紙明細のとおり」とし、本ツール内では入力しません。複数物件のため、別紙明細参照は前提として扱います（選択不要）。'
+                            : 'Payment limits / deductibles follow the separate itemized schedule and are not entered here. Since this is multi-property, schedule reference is treated as a given (no selection needed).'}
                     </p>
-                    <TriToggle
-                        label={locale === 'ja' ? '別紙明細を参照する' : 'References separate schedule'}
-                        value={attrs.schedule_reference}
-                        onChange={v => set('schedule_reference', v)}
-                        locale={locale}
-                    />
                     <TriToggle
                         label={locale === 'ja' ? '別紙明細書の受領・了知を確認済み' : 'Schedule received & acknowledged'}
                         value={attrs.schedule_acknowledged}
