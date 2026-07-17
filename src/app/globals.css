@@ -1,7 +1,6 @@
 @import "tailwindcss";
-@source not "../../docs";
+@source not "../../docs-unified";
 @source not "../../supabase";
-@source not "../../scripts";
 
 :root {
   --primary: #1a237e;
