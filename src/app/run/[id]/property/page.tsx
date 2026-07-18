@@ -15,7 +15,7 @@ import { useLocale } from '@/lib/locale-context'
 import {
     OWNERSHIP_TYPES, ownershipTypeLabel, floodRiskLabel,
     emptyPropertyAttributes, isPropertyProfileComplete, isIndividualAttributes,
-    deriveScheduleReference,
+    deriveScheduleReference, normalizePropertyAttributes,
     type OwnershipType, type PropertyAttributes,
     type IndividualPropertyAttributes, type CorporatePropertyAttributes,
 } from '@/lib/insurance/property'
@@ -45,10 +45,11 @@ export default function PropertyProfilePage() {
         ]).then(([runRes, zoneRes, profileRes]) => {
             if (runRes.data) {
                 setRun(runRes.data as Run)
-                setAttrs(
+                // 読込み時に正規化（既存データの schedule_reference を物件数から再導出）
+                setAttrs(normalizePropertyAttributes(
                     (profileRes.data?.attributes as PropertyAttributes) ??
                     emptyPropertyAttributes(runRes.data.customer_type as CustomerType),
-                )
+                ))
                 setMunicipalityCode((profileRes.data?.municipality_code as string) ?? '')
             }
             if (zoneRes.data) setZones(zoneRes.data as FloodZoneMaster[])
@@ -70,11 +71,14 @@ export default function PropertyProfilePage() {
             const { data: op } = await supabase.from('operator').select('id').eq('auth_user_id', user.id).single()
             if (!op) throw new Error('Operator not found')
 
+            // 保存時に正規化（schedule_reference を物件数から再導出してから永続化）
+            const normalized = normalizePropertyAttributes(attrs)
+
             const { error: upsertErr } = await supabase.from('property_profile').upsert({
                 run_id: runId,
                 line_code: 'fire',
                 municipality_code: municipalityCode || null,
-                attributes: attrs,
+                attributes: normalized,
             }, { onConflict: 'run_id,line_code' })
             if (upsertErr) throw upsertErr
 
@@ -87,11 +91,12 @@ export default function PropertyProfilePage() {
                     customer_type: customerType,
                     municipality_code: municipalityCode || null,
                     flood_grade: selectedZone?.flood_grade ?? null,
-                    complete: isPropertyProfileComplete(customerType, attrs),
+                    complete: isPropertyProfileComplete(customerType, normalized),
                 },
             })
             if (eventErr) throw eventErr
 
+            setAttrs(normalized)
             setSaved(true)
         } catch (err: unknown) {
             setError(err instanceof Error ? err.message : 'An error occurred')

@@ -12,6 +12,7 @@ import {
     isPropertyProfileComplete,
     isIndividualAttributes,
     deriveScheduleReference,
+    normalizePropertyAttributes,
     type IndividualPropertyAttributes,
     type CorporatePropertyAttributes,
 } from '@/lib/insurance/property'
@@ -189,6 +190,21 @@ describe('property profile completeness (Fail-Closed 最小条件・田島 2026-
         expect(isPropertyProfileComplete('corporate', contradictory)).toBe(false)
     })
 
+    it('corporate multi-site with schedule_reference=null is incomplete even if acknowledged (田島 2026-07-18 否定系)', () => {
+        const unnormalized: CorporatePropertyAttributes = {
+            property_count: 2,
+            building_structure: null,
+            floor_area_sqm_total: null,
+            schedule_reference: null,
+            schedule_acknowledged: true,
+        }
+        expect(isPropertyProfileComplete('corporate', unnormalized)).toBe(false)
+
+        // 正規化を通せば schedule_reference が true に再導出され、完了となる
+        const normalized = normalizePropertyAttributes(unnormalized)
+        expect(isPropertyProfileComplete('corporate', normalized)).toBe(true)
+    })
+
     it('deriveScheduleReference: multi-property implies true, single/unanswered stays not-applicable (null)', () => {
         expect(deriveScheduleReference(2)).toBe(true)
         expect(deriveScheduleReference(5)).toBe(true)
@@ -201,5 +217,63 @@ describe('property profile completeness (Fail-Closed 最小条件・田島 2026-
         expect(isPropertyProfileComplete('corporate', individualAttrs)).toBe(false)
         const corporateAttrs = emptyPropertyAttributes('corporate')
         expect(isPropertyProfileComplete('individual', corporateAttrs)).toBe(false)
+    })
+})
+
+describe('normalizePropertyAttributes (読込み・保存時の正規化・田島 2026-07-18指摘)', () => {
+    it('re-derives schedule_reference=true for multi-property regardless of stored value', () => {
+        const fromNull = normalizePropertyAttributes({
+            property_count: 3,
+            building_structure: null,
+            floor_area_sqm_total: null,
+            schedule_reference: null,
+            schedule_acknowledged: null,
+        }) as CorporatePropertyAttributes
+        expect(fromNull.schedule_reference).toBe(true)
+
+        const fromFalse = normalizePropertyAttributes({
+            property_count: 3,
+            building_structure: null,
+            floor_area_sqm_total: null,
+            schedule_reference: false,
+            schedule_acknowledged: null,
+        }) as CorporatePropertyAttributes
+        expect(fromFalse.schedule_reference).toBe(true)
+    })
+
+    it('re-derives schedule_reference=null for single/unanswered property count', () => {
+        const single = normalizePropertyAttributes({
+            property_count: 1,
+            building_structure: null,
+            floor_area_sqm_total: null,
+            schedule_reference: true,   // 不整合な保存値
+            schedule_acknowledged: null,
+        }) as CorporatePropertyAttributes
+        expect(single.schedule_reference).toBeNull()
+
+        const unanswered = normalizePropertyAttributes({
+            property_count: null,
+            building_structure: null,
+            floor_area_sqm_total: null,
+            schedule_reference: true,   // 不整合な保存値
+            schedule_acknowledged: null,
+        }) as CorporatePropertyAttributes
+        expect(unanswered.schedule_reference).toBeNull()
+    })
+
+    it('leaves other corporate fields and individual attributes untouched', () => {
+        const corp = normalizePropertyAttributes({
+            property_count: 2,
+            building_structure: '耐火',
+            floor_area_sqm_total: 800,
+            schedule_reference: null,
+            schedule_acknowledged: true,
+        }) as CorporatePropertyAttributes
+        expect(corp.building_structure).toBe('耐火')
+        expect(corp.floor_area_sqm_total).toBe(800)
+        expect(corp.schedule_acknowledged).toBe(true)
+
+        const indiv = emptyPropertyAttributes('individual')
+        expect(normalizePropertyAttributes(indiv)).toEqual(indiv)
     })
 })

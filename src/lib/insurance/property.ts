@@ -52,7 +52,7 @@ export interface IndividualPropertyAttributes {
 // schedule_reference は複数物件（property_count >= 2）の前提として自動的に true が
 // 導出される派生値であり、利用者が直接選択する項目ではない（田島 2026-07-16指摘）。
 // 「別紙明細を参照する＝いいえ」かつ「受領確認＝はい」という矛盾状態を防ぐため、
-// deriveScheduleReference() で単一物件=false/未該当、複数物件=true に統一する。
+// deriveScheduleReference() で単一物件・未回答=null（非該当）、複数物件=true に統一する。
 export interface CorporatePropertyAttributes {
     property_count: number | null              // 物件数（複数拠点）。未回答=null
     building_structure: string | null   // 構造（共通・簡易）
@@ -67,6 +67,16 @@ export interface CorporatePropertyAttributes {
 export function deriveScheduleReference(propertyCount: number | null): boolean | null {
     if (propertyCount === null || propertyCount < 2) return null
     return true
+}
+
+// 読込み時・保存時の正規化（田島 2026-07-18指摘）。
+// 既存データや外部由来のデータで schedule_reference が物件数と整合しない状態
+// （例: property_count=2 なのに schedule_reference=null）が残らないよう、
+// 常に property_count から再導出して上書きする。
+// 個人属性は導出項目を持たないためそのまま返す。
+export function normalizePropertyAttributes(a: PropertyAttributes): PropertyAttributes {
+    if (isIndividualAttributes(a)) return a
+    return { ...a, schedule_reference: deriveScheduleReference(a.property_count) }
 }
 
 export type PropertyAttributes = IndividualPropertyAttributes | CorporatePropertyAttributes
@@ -102,9 +112,10 @@ export function emptyPropertyAttributes(customerType: CustomerType): PropertyAtt
 // 入力完了判定（Fail-Closed の最小条件。必須項目の詳細範囲はb1-MS2で整理）
 // - 空の個人/企業プロファイルは不完了
 // - 完了判定の対象となるはい/いいえ項目が未回答（null）の場合は不完了
-// - 企業の複数物件（property_count >= 2）は、別紙明細の受領確認（schedule_acknowledged === true）を必須とする
-// - schedule_reference が false（別紙参照なしと明示された矛盾状態）の場合は、
-//   schedule_acknowledgedの値に関わらず不完了とする（田島 2026-07-16指摘の矛盾防止）
+// - 企業の複数物件（property_count >= 2）は、schedule_reference === true かつ
+//   schedule_acknowledged === true の場合のみ完了とする（田島 2026-07-18指摘）。
+//   schedule_reference が null（未導出）や false（矛盾）の場合は、
+//   schedule_acknowledged の値に関わらず不完了。
 export function isPropertyProfileComplete(customerType: CustomerType, a: PropertyAttributes): boolean {
     if (customerType === 'individual' && isIndividualAttributes(a)) {
         if (a.ownership_type === null) return false
@@ -118,8 +129,7 @@ export function isPropertyProfileComplete(customerType: CustomerType, a: Propert
     if (customerType === 'corporate' && !isIndividualAttributes(a)) {
         if (a.property_count === null || a.property_count < 1) return false
         if (a.property_count === 1) return true
-        if (a.schedule_reference === false) return false
-        return a.schedule_acknowledged === true
+        return a.schedule_reference === true && a.schedule_acknowledged === true
     }
     return false
 }
