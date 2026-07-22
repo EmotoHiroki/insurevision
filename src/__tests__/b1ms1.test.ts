@@ -13,6 +13,7 @@ import {
     isIndividualAttributes,
     deriveScheduleReference,
     normalizePropertyAttributes,
+    isValidPropertyCount,
     type IndividualPropertyAttributes,
     type CorporatePropertyAttributes,
 } from '@/lib/insurance/property'
@@ -275,5 +276,74 @@ describe('normalizePropertyAttributes (読込み・保存時の正規化・田�
 
         const indiv = emptyPropertyAttributes('individual')
         expect(normalizePropertyAttributes(indiv)).toEqual(indiv)
+    })
+})
+
+describe('第6段階: schedule_acknowledged 非該当時 null化（田島 2026-07-21）', () => {
+    it('resets schedule_acknowledged to null when reverted to single property', () => {
+        const reverted = normalizePropertyAttributes({
+            property_count: 1,           // 複数→単一へ戻した
+            building_structure: null,
+            floor_area_sqm_total: null,
+            schedule_reference: true,
+            schedule_acknowledged: true, // 複数物件時の残存値
+        }) as CorporatePropertyAttributes
+        expect(reverted.schedule_reference).toBeNull()
+        expect(reverted.schedule_acknowledged).toBeNull()
+    })
+
+    it('resets schedule_acknowledged to null when property count reverted to unanswered', () => {
+        const reverted = normalizePropertyAttributes({
+            property_count: null,
+            building_structure: null,
+            floor_area_sqm_total: null,
+            schedule_reference: true,
+            schedule_acknowledged: true,
+        }) as CorporatePropertyAttributes
+        expect(reverted.schedule_acknowledged).toBeNull()
+    })
+
+    it('keeps schedule_acknowledged when still multi-property', () => {
+        const kept = normalizePropertyAttributes({
+            property_count: 2,
+            building_structure: null,
+            floor_area_sqm_total: null,
+            schedule_reference: true,
+            schedule_acknowledged: true,
+        }) as CorporatePropertyAttributes
+        expect(kept.schedule_reference).toBe(true)
+        expect(kept.schedule_acknowledged).toBe(true)
+    })
+})
+
+describe('第6段階: property_count の正整数検査（田島 2026-07-21）', () => {
+    it('accepts null (unanswered) and positive integers', () => {
+        expect(isValidPropertyCount(null)).toBe(true)
+        expect(isValidPropertyCount(1)).toBe(true)
+        expect(isValidPropertyCount(2)).toBe(true)
+        expect(isValidPropertyCount(50)).toBe(true)
+    })
+
+    it('rejects 0, negatives, decimals, NaN and non-numbers', () => {
+        expect(isValidPropertyCount(0)).toBe(false)
+        expect(isValidPropertyCount(-1)).toBe(false)
+        expect(isValidPropertyCount(2.5)).toBe(false)
+        expect(isValidPropertyCount(1.0000001)).toBe(false)
+        expect(isValidPropertyCount(Number.NaN)).toBe(false)
+        expect(isValidPropertyCount('2')).toBe(false)
+        expect(isValidPropertyCount(undefined)).toBe(false)
+    })
+
+    it('normalize coerces an invalid stored property_count to null (no silent flooring)', () => {
+        const bad = normalizePropertyAttributes({
+            property_count: 2.5 as unknown as number, // 不正な保存値
+            building_structure: null,
+            floor_area_sqm_total: null,
+            schedule_reference: true,
+            schedule_acknowledged: true,
+        }) as CorporatePropertyAttributes
+        expect(bad.property_count).toBeNull()       // 2 へ丸めない
+        expect(bad.schedule_reference).toBeNull()
+        expect(bad.schedule_acknowledged).toBeNull()
     })
 })

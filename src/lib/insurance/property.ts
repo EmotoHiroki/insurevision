@@ -69,14 +69,31 @@ export function deriveScheduleReference(propertyCount: number | null): boolean |
     return true
 }
 
-// 読込み時・保存時の正規化（田島 2026-07-18指摘）。
-// 既存データや外部由来のデータで schedule_reference が物件数と整合しない状態
-// （例: property_count=2 なのに schedule_reference=null）が残らないよう、
-// 常に property_count から再導出して上書きする。
+// property_count が「正の整数、または未回答(null)」であることの検査（第6段階）。
+// 未回答は null を許容し、入力された場合に限り正の整数を要求する（田島 2026-07-21）。
+// 小数・0・負数・非数値・NaN は不正。Math.floor等の自動丸めは行わない。
+export function isValidPropertyCount(value: unknown): value is number | null {
+    if (value === null) return true
+    return typeof value === 'number' && Number.isInteger(value) && value >= 1
+}
+
+// 読込み時・保存時の正規化（田島 2026-07-18・2026-07-21指摘）。
+// 1) schedule_reference: 物件数と整合しない状態が残らないよう常に再導出する。
+// 2) schedule_acknowledged: 複数物件でない場合、別紙明細は非該当のため未回答(null)へ戻す
+//    （非該当項目に回答値が残らないようにする。第6段階）。
+// 3) property_count: 不正値（小数・0・負数・非数値）は未回答(null)へ是正する
+//    （画面表示・派生の健全性を保つ。保存前の拒否は API/DB 側で別途行う）。
 // 個人属性は導出項目を持たないためそのまま返す。
 export function normalizePropertyAttributes(a: PropertyAttributes): PropertyAttributes {
     if (isIndividualAttributes(a)) return a
-    return { ...a, schedule_reference: deriveScheduleReference(a.property_count) }
+    const propertyCount = isValidPropertyCount(a.property_count) ? a.property_count : null
+    const scheduleReference = deriveScheduleReference(propertyCount)
+    return {
+        ...a,
+        property_count: propertyCount,
+        schedule_reference: scheduleReference,
+        schedule_acknowledged: scheduleReference === true ? a.schedule_acknowledged : null,
+    }
 }
 
 export type PropertyAttributes = IndividualPropertyAttributes | CorporatePropertyAttributes

@@ -15,7 +15,7 @@ import { useLocale } from '@/lib/locale-context'
 import {
     OWNERSHIP_TYPES, ownershipTypeLabel, floodRiskLabel,
     emptyPropertyAttributes, isPropertyProfileComplete, isIndividualAttributes,
-    deriveScheduleReference, normalizePropertyAttributes,
+    deriveScheduleReference, normalizePropertyAttributes, isValidPropertyCount,
     type OwnershipType, type PropertyAttributes,
     type IndividualPropertyAttributes, type CorporatePropertyAttributes,
 } from '@/lib/insurance/property'
@@ -308,10 +308,12 @@ function CorporateForm({ attrs, onChange, locale }: {
 
             <div>
                 <label className="form-label">{locale === 'ja' ? '物件数' : 'Property count'}</label>
-                <input type="number" min={1} className="form-input" value={attrs.property_count ?? ''}
+                <input type="number" min={1} step={1} className="form-input" value={attrs.property_count ?? ''}
                     placeholder={locale === 'ja' ? '未回答' : 'Unanswered'}
                     onChange={e => {
-                        const count = e.target.value ? Math.max(1, Number(e.target.value)) : null
+                        // 未回答は null。入力時は正の整数のみ受理（小数・0・負数は不正として未回答扱い、自動丸めしない）。
+                        const raw = e.target.value === '' ? null : Number(e.target.value)
+                        const count = isValidPropertyCount(raw) ? raw : null
                         onChange({ ...attrs, property_count: count, schedule_reference: deriveScheduleReference(count) })
                     }} />
             </div>
