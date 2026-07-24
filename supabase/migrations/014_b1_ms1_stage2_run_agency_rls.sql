@@ -5,7 +5,9 @@
 -- 前提: 第1段階（013・operator）適用後であること。operatorが未是正のまま
 --       run だけ固めても agency_id 付替で迂回可能なため。
 --
--- 【本ファイルの状態】本番へは未適用。第2段階のご確認・ご承認後に適用する。
+-- 【本ファイルの状態】田島様2026-07-24ご承認により、本番DB（ytpaklotlgrbslshjggc）へ適用済み
+--   （013の直後・012→013→014の順）。適用後、実operatorとしてSELECT件数（run=31・
+--   audit_event=241・operator=1・property_profile=4）の無変更を確認済み。
 --
 -- 【現状（実測）】run のポリシーは "Authenticated users can do everything on runs"
 --   （ALL・qual=true・with_check=true）の1件のみ。ログイン済みなら代理店を問わず
