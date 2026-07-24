@@ -1,27 +1,51 @@
 -- =============================================
--- Phase2-b-1 b1-MS1 是正 第5段階: property_profile保存とaudit_event記録の一体化
+-- Phase2-b-1 b1-MS1 是正 第5段階: property_profile保存とaudit_event記録の一体化（再設計版）
 -- =============================================
 -- 田島様2026-07-21合意の第5段階。区分A（b1-MS1固有）。
--- 【本ファイルの状態】本番へは未適用。第5段階のご確認・ご承認後に適用する。
+-- 【本ファイルの状態】本番へは未適用。田島様2026-07-24ご指摘を反映した再設計版。
+--   別紙「b1-MS1 第5段階 save_property_profile設計案」でのご確認・ご承認後に適用する。
 --
--- 【現状】アプリは property_profile の upsert と audit_event の insert を
---   クライアントから2回の独立呼出で実行しており、単一トランザクションでない。
---   証跡記録だけ失敗すると「物件情報のみ更新・証跡なし」の状態が残り得る。
---   また payload をクライアントから任意受領しており、実保存内容と不一致な証跡を
---   残せる余地がある。
+-- 【改訂（2026-07-24・再設計）】
+-- 初版は save_property_profile を SECURITY INVOKER とし、既存RLS（agencyスコープ）に
+-- 委ねる方式としていた。田島様より次のご指摘をいただいた:
+--   「authenticatedユーザーが property_profile への直接INSERT/UPDATE権限を保持したままでは、
+--    本関数を経由せず直接書込みが可能であり、保存はされるが対応する audit_event が
+--    存在しない状態を作れてしまう。SECURITY INVOKERのまま権限を剥奪すると関数自身も
+--    書込みできなくなるため、権限付き関数やトリガー等を含め、既存RLSと整合する案を
+--    ご提示いただきたい。」
+-- ご指摘のとおり、権限剥奪とSECURITY INVOKER維持は両立しない。以下のとおり再設計する。
 --
--- 【方針（田島様 pt6/pt8）】
---   1. 保存＋証跡を1つのSECURITY INVOKER関数へ集約し単一トランザクション化。
---      SECURITY INVOKER のため既存RLS（第1段階の operator_id 本人性検査を含む）が
---      そのまま評価され、代理店分離が維持される。
---   2. operator_id はクライアントから受けず auth.uid() から導出。
---   3. 証跡の主要項目（municipality_code / flood_grade / customer_type / operator_id）は
---      関数内で実データから生成し、クライアント値で上書きさせない（真正性）。
---   4. 各保存にDB生成の更新ID（last_save_id）を付与し、property_profile と
---      audit_event.payload の双方に保持して1対1で対応付ける。
+-- 【再設計方針】
+--   1. property_profile への INSERT/UPDATE/DELETE 権限を authenticated から剥奪する
+--      （SELECTは維持。既存RLSポリシー property_profile_own_agency による自代理店閲覧は
+--      従来どおり継続）。これにより直接のテーブル書込み経路そのものを塞ぐ。
+--   2. save_property_profile を SECURITY DEFINER へ変更し、関数所有者（テーブル所有者）
+--      権限で書込みを行う。SECURITY DEFINER は RLS を完全に迂回するため、関数内で
+--      既存RLSと同等のチェック（対象runが呼出userのagencyに属すること）を手動で実施し、
+--      RLSと整合する認可を維持する（田島様「既存RLSと整合する案」に対応）。
+--   3. search_path を固定し、PUBLIC/anon から EXECUTE を剥奪、authenticated にのみ許可する
+--      （第3段階 finalize_run 設計案と同一のSECURITY DEFINER衛生方針）。
+--   4. operator_id・証跡主要項目の関数内導出（初版から維持）、last_save_id による
+--      property_profile-audit_event の1対1対応付け（初版から維持）。
+--
+-- 【この設計で塞がる経路・塞がらない経路】
+--   - authenticated による property_profile への直接 INSERT/UPDATE/DELETE: 塞がる（権限剥奪）。
+--   - save_property_profile 経由の保存: 従来どおり可能（SECURITY DEFINER・関数内でagency照合）。
+--   - service_role・postgres からの直接操作: 対象外（アプリはservice_roleを使用しない前提。
+--     RLS設計全体の前提と同じ）。
+--
+-- 【アプリ側の変更（migrationと同一単位で適用予定・別紙§3参照）】
+--   `src/app/run/[id]/property/page.tsx` の save() を、現行の
+--   `supabase.from('property_profile').upsert(...)` ＋ 別呼出の audit_event insert から、
+--   単一の `supabase.rpc('save_property_profile', {...})` 呼出へ置き換える。
+--   本migration適用とAPI変更は同一デプロイ単位とする（旧アプリコードのままだと、
+--   権限剥奪後は直接upsertが失敗するため）。
 
 -- 更新IDの保持列（property_profile 側）
 ALTER TABLE property_profile ADD COLUMN IF NOT EXISTS last_save_id uuid;
+
+-- authenticated からの property_profile 直接書込み権限を剥奪（SELECTは維持）
+REVOKE INSERT, UPDATE, DELETE ON TABLE property_profile FROM authenticated;
 
 CREATE OR REPLACE FUNCTION public.save_property_profile(
     p_run_id uuid,
@@ -32,23 +56,38 @@ CREATE OR REPLACE FUNCTION public.save_property_profile(
 )
 RETURNS uuid                       -- 生成した save_id を返す
 LANGUAGE plpgsql
-SECURITY INVOKER                   -- 呼出ユーザー権限。既存RLSをそのまま適用する
+SECURITY DEFINER                   -- 権限剥奪後も関数自身は書込み可能にするため。
+                                    -- RLSを迂回する分、関数内でRLS相当の認可チェックを
+                                    -- 手動実施する（下記）。
 SET search_path = public
 AS $$
 DECLARE
-    v_operator_id  uuid;
+    v_operator_id   uuid;
+    v_agency_id     uuid;
+    v_run_agency    uuid;
     v_customer_type text;
-    v_flood_grade  int;
-    v_save_id      uuid := gen_random_uuid();
+    v_flood_grade   int;
+    v_save_id       uuid := gen_random_uuid();
 BEGIN
-    -- 呼出ユーザーの operator を auth.uid() から導出（クライアント値を信用しない）
-    SELECT id INTO v_operator_id FROM operator WHERE auth_user_id = auth.uid();
+    -- 呼出ユーザーの operator・agency を auth.uid() から導出（クライアント値を信用しない）
+    SELECT id, agency_id INTO v_operator_id, v_agency_id
+    FROM operator WHERE auth_user_id = auth.uid();
     IF v_operator_id IS NULL THEN
         RAISE EXCEPTION 'save_property_profile: 呼出ユーザーが特定できません';
     END IF;
 
+    -- RLS相当の認可チェック: 対象runが呼出userのagencyに属すること
+    -- （SECURITY DEFINERはRLSを迂回するため、本関数内で明示的に検査する）
+    SELECT agency_id, customer_type INTO v_run_agency, v_customer_type
+    FROM run WHERE id = p_run_id;
+    IF v_run_agency IS NULL THEN
+        RAISE EXCEPTION 'save_property_profile: 対象runが存在しません';
+    END IF;
+    IF v_run_agency IS DISTINCT FROM v_agency_id THEN
+        RAISE EXCEPTION 'save_property_profile: 権限がありません（他代理店のrun）';
+    END IF;
+
     -- 証跡の主要項目は実データから生成（改ざん防止）
-    SELECT customer_type INTO v_customer_type FROM run WHERE id = p_run_id;
     SELECT flood_grade INTO v_flood_grade FROM flood_zone_master WHERE municipality_code = p_municipality_code;
 
     -- (1) property_profile を upsert（run_id + line_code でユニーク）。last_save_id を付与
@@ -85,6 +124,13 @@ $$;
 REVOKE EXECUTE ON FUNCTION public.save_property_profile(uuid, text, text, jsonb, boolean) FROM PUBLIC, anon;
 GRANT  EXECUTE ON FUNCTION public.save_property_profile(uuid, text, text, jsonb, boolean) TO authenticated;
 
+-- 【検証用】直接書込みが拒否されることの確認（ロールバック付きトランザクションで実施予定）:
+--   BEGIN; SET LOCAL ROLE authenticated;
+--   SELECT set_config('request.jwt.claim.sub','<uuid>',true);
+--   INSERT INTO property_profile (run_id, line_code, attributes) VALUES ('<run_id>','fire','{}');
+--   -- 期待結果: ERROR: permission denied for table property_profile
+--   ROLLBACK;
+--
 -- 【検証用】各 property_profile の last_save_id に対応する audit_event が存在するか:
 --   SELECT pp.run_id FROM property_profile pp
 --   WHERE pp.last_save_id IS NOT NULL AND NOT EXISTS (
