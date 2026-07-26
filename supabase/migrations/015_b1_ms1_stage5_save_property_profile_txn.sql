@@ -31,6 +31,11 @@
 --      RLSと整合する認可を維持する（田島様「既存RLSと整合する案」に対応）。
 --   3. search_path を空にして全参照をスキーマ修飾し、PUBLIC/anon から EXECUTE を剥奪、
 --      authenticated にのみ許可する（第3段階 finalize_run 設計案と同一のSECURITY DEFINER衛生方針）。
+--      【search_path='' と組込み関数について】search_path が空でも pg_catalog は常に暗黙的に
+--      検索されるため、now()・jsonb_build_object()・gen_random_uuid() 等は修飾なしで安全に
+--      解決される。特に gen_random_uuid() は本番DBに pg_catalog（PG13以降の組込み）と
+--      extensions（pgcrypto）の両方に存在するが（2026-07-26実測）、pg_catalog が優先される
+--      ため意図した組込み版が呼ばれる。テーブル・自作関数のみ public. 修飾が必須。
 --   4. operator_id・証跡主要項目の関数内導出（初版から維持）、last_save_id による
 --      property_profile-audit_event の1対1対応付け（初版から維持）。
 --   5. 完了状態（complete）はクライアントの申告を信用せず、p_attributesから関数内で再導出する。
