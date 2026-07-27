@@ -69,7 +69,9 @@ REVOKE ALL ON TABLE public.smartphone_confirm_token FROM PUBLIC;
 REVOKE ALL ON TABLE public.smartphone_confirm_token FROM anon;
 REVOKE ALL ON TABLE public.smartphone_confirm_token FROM authenticated;
 
--- 注: ALL は SELECT/INSERT/UPDATE/DELETE/TRUNCATE/REFERENCES/TRIGGER の7権限を含む。
+-- 注: ALL は SELECT/INSERT/UPDATE/DELETE/TRUNCATE/REFERENCES/TRIGGER/MAINTAIN の
+--     8権限を含む（MAINTAIN は PostgreSQL 17 で追加。本番は 17.6）。ACL 表記
+--     arwdDxtm の末尾 m が MAINTAIN にあたる。
 --     TRUNCATE の剥奪は本文で個別に検証せず、has_table_privilege と ACL の
 --     実出力で確認する（本番データに対する TRUNCATE の実行試験は行わない）。
 
@@ -109,14 +111,16 @@ BEGIN
     END IF;
 
     -- PUBLIC・anon・authenticated に残存権限がないこと。
-    -- has_table_privilege を7権限すべてについて評価する。
+    -- has_table_privilege を8権限すべてについて評価する（MAINTAIN を含む）。
+    -- 7権限で判定すると MAINTAIN のみが残存した場合を検知できない。
     SELECT string_agg(format('%s:%s', g.grantee, g.priv), ', ' ORDER BY g.grantee, g.priv)
       INTO v_remaining
       FROM (
           SELECT r.rolname AS grantee, p.priv
             FROM (VALUES ('public'), ('anon'), ('authenticated')) AS r(rolname)
            CROSS JOIN (VALUES ('SELECT'), ('INSERT'), ('UPDATE'), ('DELETE'),
-                              ('TRUNCATE'), ('REFERENCES'), ('TRIGGER')) AS p(priv)
+                              ('TRUNCATE'), ('REFERENCES'), ('TRIGGER'),
+                              ('MAINTAIN')) AS p(priv)
            WHERE has_table_privilege(r.rolname, 'public.smartphone_confirm_token', p.priv)
       ) g;
 
