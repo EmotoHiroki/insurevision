@@ -89,6 +89,13 @@ ALTER TABLE run_participant ENABLE ROW LEVEL SECURITY;
 -- RLS is intentionally DISABLED on production. Access control is enforced at the
 -- API layer: the token is an unguessable UUID and the public endpoint returns
 -- run:null for used/expired tokens (no customer info leak). Matched here.
+--
+-- !! 上記の前提は 2026-07-25 の実測により誤りであることが判明した（migration 016 で是正）。
+--    「トークンは推測不能なUUID」はAPI経由の取得を防ぐだけで、テーブルへの直接アクセスを
+--    防がない。実測では anon が SELECT で全18件を列挙でき（推測が不要になる）、さらに
+--    used_at を NULL に戻す UPDATE も成立した（使用済みトークンの再利用が可能）。
+--    RLSを無効のまま「API層で担保」とする設計は成立しない。016 で RLS 有効化＋
+--    PUBLIC/anon/authenticated からの全権限剥奪を行う。本コメントは経緯の記録として残す。
 CREATE TABLE IF NOT EXISTS smartphone_confirm_token (
     id          uuid PRIMARY KEY DEFAULT gen_random_uuid(),
     run_id      uuid NOT NULL REFERENCES run(id) ON DELETE CASCADE,
