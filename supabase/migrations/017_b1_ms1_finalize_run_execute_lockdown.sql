@@ -1,7 +1,8 @@
 -- ============================================================================
 -- 017_b1_ms1_finalize_run_execute_lockdown.sql
 --
--- 状態: 未適用（本番適用には田島様のご承認が必要）
+-- 状態: 本番適用済み（2026-07-27 16:03 UTC。has_function_privilege により
+--       PUBLIC/anon=false・authenticated=true を確認済み）
 --
 -- 目的: SECURITY DEFINER 関数に対する PUBLIC / anon の EXECUTE 権限を剥奪する。
 --
