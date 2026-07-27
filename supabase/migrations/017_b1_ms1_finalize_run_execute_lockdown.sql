@@ -6,7 +6,7 @@
 --
 -- 目的: SECURITY DEFINER 関数に対する PUBLIC / anon の EXECUTE 権限を剥奪する。
 --
--- 背景（田島様2026-07-28ご指摘8「関数の棚卸しが未実施」に基づく調査結果）:
+-- 背景（田島様2026-07-27 23:41ご指摘8「関数の棚卸しが未実施」に基づく調査結果）:
 --
 --   `public.finalize_run` は以下の状態にある。
 --     - SECURITY DEFINER（所有者 postgres。postgres は rolbypassrls=true のため
@@ -28,7 +28,7 @@
 --   audit_event の INSERT ポリシー（012/013 で導入した operator_id 本人性検査）は、
 --   SECURITY DEFINER によりRLSごと迂回されるため機能しない。
 --
---   本番の draft run は18件（2026-07-28時点）。
+--   本番の draft run は18件（2026-07-27時点）。
 --
 -- 重要・証明の範囲について:
 --   上記のうち「anon に EXECUTE がある」「関数本体に照合がない」「SECURITY DEFINER
