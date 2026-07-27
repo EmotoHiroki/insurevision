@@ -36,11 +36,26 @@
 -- 「RLS有効 かつ ポリシー0件」は deny-all を意味する。
 ALTER TABLE public.smartphone_confirm_token ENABLE ROW LEVEL SECURITY;
 
--- ── 2. RLS を所有者にも強制する ────────────────────────────────────────
--- テーブル所有者はデフォルトでRLSを迂回する。将来、所有者ロールで動作する
--- 経路が追加された場合に意図せず迂回されることを防ぐ。
--- （SECURITY DEFINER 関数は定義者権限で動作するため、第4段階の関数群は
---   FORCE 下でも動作するようRLSではなく関数内の照合で認可する設計とする）
+-- ── 2. RLS を所有者にも適用する（本環境では現時点で実効なし・下記参照）──
+-- FORCE ROW LEVEL SECURITY はテーブル所有者にもRLSを適用する設定。
+--
+-- ただし本環境では、この設定は現時点で実質的な保護を与えない。実測の結果、
+-- 本テーブルの所有者は postgres であり、postgres は rolbypassrls = true を
+-- 持つ。BYPASSRLS 属性は FORCE より優先されるため、postgres は FORCE の
+-- 有無にかかわらずRLSを迂回する。
+--   実測: table_owner=postgres, owner_has_bypassrls=t
+--
+-- したがって「FORCE を付けたので所有者経由の迂回も塞がれた」とは言えない。
+-- 実際の保護は下の REVOKE（権限剥奪）が担っている。
+--
+-- それでも FORCE を付ける理由は、将来テーブルの所有者が BYPASSRLS を持たない
+-- ロールへ変更された場合に、その時点で自動的に効き始める多層防御であるため。
+-- 現時点での効果を過大に記載しないよう、ここに明記する。
+--
+-- なお、第4段階で追加する SECURITY DEFINER 関数（所有者 postgres）は、
+-- 上記のとおり postgres が BYPASSRLS を持つため FORCE 下でも動作する。
+-- 実測で確認済み（authenticated から呼出して18件取得できることを確認・ROLLBACK済み）。
+-- ただし関数がRLSを迂回する以上、認可は関数内の明示的な照合で行う必要がある。
 ALTER TABLE public.smartphone_confirm_token FORCE ROW LEVEL SECURITY;
 
 -- ── 3. テーブル権限を剥奪する ──────────────────────────────────────────
