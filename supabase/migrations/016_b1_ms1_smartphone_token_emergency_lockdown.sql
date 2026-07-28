@@ -1,6 +1,17 @@
 -- ============================================================================
 -- 016_b1_ms1_smartphone_token_emergency_lockdown.sql
 --
+-- 状態: 本番適用済み（2026-07-27。台帳 version 20260727101932）
+--
+-- 本ファイルは、本番へ実際に実行した5文と一致させている（田島様2026-07-27
+-- 23:41ご指摘4「適用済みmigrationは適用後に内容を書き換えない」に対応）。
+--
+-- 自己検査（RLS有効・FORCE有効・ポリシー0件・残存権限なしの確認）は、
+-- 本ファイルには含めない。理由と詳細は
+-- `supabase/verification/016_017_post_apply_checks.sql` を参照。
+-- 本ファイル単体を新規DBへ通し適用した場合の状態は、上記検証ファイルを
+-- 続けて実行することで確認できる。
+--
 -- 目的: smartphone_confirm_token への未認証アクセスを緊急に遮断する。
 --
 -- 背景:
@@ -50,7 +61,7 @@ ALTER TABLE public.smartphone_confirm_token ENABLE ROW LEVEL SECURITY;
 --
 -- それでも FORCE を付ける理由は、将来テーブルの所有者が BYPASSRLS を持たない
 -- ロールへ変更された場合に、その時点で自動的に効き始める多層防御であるため。
--- 現時点での効果を過大に記載しないよう、ここに明記する。
+-- 現時点での効果を過大に記載しないよう、ここに明記する（020で他16テーブルにも拡張済み）。
 --
 -- なお、第4段階で追加する SECURITY DEFINER 関数（所有者 postgres）は、
 -- 上記のとおり postgres が BYPASSRLS を持つため FORCE 下でも動作する。
@@ -74,60 +85,3 @@ REVOKE ALL ON TABLE public.smartphone_confirm_token FROM authenticated;
 --     arwdDxtm の末尾 m が MAINTAIN にあたる。
 --     TRUNCATE の剥奪は本文で個別に検証せず、has_table_privilege と ACL の
 --     実出力で確認する（本番データに対する TRUNCATE の実行試験は行わない）。
-
--- ── 4. 適用結果の自己検証 ──────────────────────────────────────────────
--- 適用トランザクション内で、意図した状態になっていることを検査する。
--- 失敗した場合は例外を送出し、migration 全体をロールバックさせる。
-DO $$
-DECLARE
-    v_rls_enabled  boolean;
-    v_rls_forced   boolean;
-    v_policy_count integer;
-    v_remaining    text;
-BEGIN
-    SELECT c.relrowsecurity, c.relforcerowsecurity
-      INTO v_rls_enabled, v_rls_forced
-      FROM pg_class c
-      JOIN pg_namespace n ON n.oid = c.relnamespace
-     WHERE n.nspname = 'public'
-       AND c.relname = 'smartphone_confirm_token';
-
-    IF v_rls_enabled IS DISTINCT FROM true THEN
-        RAISE EXCEPTION '016 self-check failed: RLS is not enabled on smartphone_confirm_token';
-    END IF;
-
-    IF v_rls_forced IS DISTINCT FROM true THEN
-        RAISE EXCEPTION '016 self-check failed: RLS is not FORCEd on smartphone_confirm_token';
-    END IF;
-
-    -- 直接アクセスを許可するポリシーが存在しないこと（田島様ご指示）
-    SELECT count(*) INTO v_policy_count
-      FROM pg_policies
-     WHERE schemaname = 'public'
-       AND tablename  = 'smartphone_confirm_token';
-
-    IF v_policy_count <> 0 THEN
-        RAISE EXCEPTION '016 self-check failed: expected 0 policies, found %', v_policy_count;
-    END IF;
-
-    -- PUBLIC・anon・authenticated に残存権限がないこと。
-    -- has_table_privilege を8権限すべてについて評価する（MAINTAIN を含む）。
-    -- 7権限で判定すると MAINTAIN のみが残存した場合を検知できない。
-    SELECT string_agg(format('%s:%s', g.grantee, g.priv), ', ' ORDER BY g.grantee, g.priv)
-      INTO v_remaining
-      FROM (
-          SELECT r.rolname AS grantee, p.priv
-            FROM (VALUES ('public'), ('anon'), ('authenticated')) AS r(rolname)
-           CROSS JOIN (VALUES ('SELECT'), ('INSERT'), ('UPDATE'), ('DELETE'),
-                              ('TRUNCATE'), ('REFERENCES'), ('TRIGGER'),
-                              ('MAINTAIN')) AS p(priv)
-           WHERE has_table_privilege(r.rolname, 'public.smartphone_confirm_token', p.priv)
-      ) g;
-
-    IF v_remaining IS NOT NULL THEN
-        RAISE EXCEPTION '016 self-check failed: privileges remain -> %', v_remaining;
-    END IF;
-
-    RAISE NOTICE '016 self-check passed: RLS enabled+forced, 0 policies, no privileges for PUBLIC/anon/authenticated';
-END;
-$$;

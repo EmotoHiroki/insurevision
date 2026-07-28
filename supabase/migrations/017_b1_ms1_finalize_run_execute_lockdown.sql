@@ -1,8 +1,16 @@
 -- ============================================================================
 -- 017_b1_ms1_finalize_run_execute_lockdown.sql
 --
--- 状態: 本番適用済み（2026-07-27 16:03 UTC。has_function_privilege により
---       PUBLIC/anon=false・authenticated=true を確認済み）
+-- 状態: 本番適用済み（台帳 version 20260727160326）。実行そのものの正確な
+--       時刻・実行ロールは記録していない（ダッシュボードのSQLエディタ経由で
+--       適用したため。016のようにトランザクション内で now()・current_user を
+--       同時に取得していない）。
+--
+-- 本ファイルは、本番へ実際に実行し台帳へ登録した6文と一致させている
+-- （田島様2026-07-27 23:41ご指摘4に対応。016と記載方法を統一）。
+--
+-- 自己検査は本ファイルに含めない。詳細は
+-- `supabase/verification/016_017_post_apply_checks.sql` を参照。
 --
 -- 目的: SECURITY DEFINER 関数に対する PUBLIC / anon の EXECUTE 権限を剥奪する。
 --
@@ -30,12 +38,10 @@
 --
 --   本番の draft run は18件（2026-07-27時点）。
 --
--- 重要・証明の範囲について:
---   上記のうち「anon に EXECUTE がある」「関数本体に照合がない」「SECURITY DEFINER
---   かつ所有者が BYPASSRLS を持つ」は、いずれもカタログおよび関数定義から確認した
---   事実である。一方、**実際に anon として本関数を実行する試験は未実施**である
---   （検証セッションが読取専用ロールに切り替わったため）。したがって上記の帰結は
---   定義からの導出であり、実測ではない。実測は本migrationの適用前後に取得する。
+--   本ファイル作成当時は「anonとして実際に実行する試験は未実施」であったが、
+--   その後 anon キーのみで /rest/v1/rpc/finalize_run および
+--   /rest/v1/rpc/get_my_agency_id を実際に呼び出し、いずれも
+--   42501 permission denied（HTTP 401）で拒否されることを実測で確認済み。
 --
 -- 本migrationの範囲（緊急遮断のみ）:
 --   PUBLIC と anon から EXECUTE を剥奪し、authenticated にのみ付与する。
@@ -49,7 +55,8 @@
 --   - 代理店照合（対象 run が呼出者の代理店に属することの検査）
 --   - search_path の是正（本体が非修飾の `run` / `audit_event` を参照しているため、
 --     search_path='' を設定するには本体の完全修飾が必須。同時に行う）
---   - operator.is_active の確認
+--   - operator.is_active の確認（018で全RLSポリシーの基点であるget_my_agency_id()
+--     自体に追加済み。finalize_run内で直接operator.is_activeを見る形にはしていない）
 --   これらを行わない限り、**authenticated であれば他代理店の run を確定できる状態は
 --   残る**。本migrationは未認証経路のみを塞ぐものであり、恒久是正ではない。
 -- ============================================================================
@@ -65,31 +72,3 @@ GRANT  EXECUTE ON FUNCTION public.finalize_run(uuid, text, text, uuid, boolean) 
 REVOKE EXECUTE ON FUNCTION public.get_my_agency_id() FROM PUBLIC;
 REVOKE EXECUTE ON FUNCTION public.get_my_agency_id() FROM anon;
 GRANT  EXECUTE ON FUNCTION public.get_my_agency_id() TO authenticated;
-
--- ── 自己検査 ────────────────────────────────────────────────────────────
-DO $$
-DECLARE
-    v_bad text;
-BEGIN
-    SELECT string_agg(format('%s/%s', r.rolname, p.proname), ', ')
-      INTO v_bad
-      FROM pg_proc p
-      JOIN pg_namespace n ON n.oid = p.pronamespace
-     CROSS JOIN (VALUES ('public'), ('anon')) AS r(rolname)
-     WHERE n.nspname = 'public'
-       AND p.proname IN ('finalize_run', 'get_my_agency_id')
-       AND has_function_privilege(r.rolname, p.oid, 'EXECUTE');
-
-    IF v_bad IS NOT NULL THEN
-        RAISE EXCEPTION '017 self-check failed: EXECUTE still present -> %', v_bad;
-    END IF;
-
-    -- authenticated には残っていること（アプリの正規経路を壊していないこと）
-    IF NOT has_function_privilege('authenticated',
-            'public.finalize_run(uuid,text,text,uuid,boolean)', 'EXECUTE') THEN
-        RAISE EXCEPTION '017 self-check failed: authenticated lost EXECUTE on finalize_run';
-    END IF;
-
-    RAISE NOTICE '017 self-check passed';
-END;
-$$;
