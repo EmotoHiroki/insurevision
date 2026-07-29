@@ -131,3 +131,44 @@ $$;
 --     /rest/v1/rpc/get_my_agency_id を呼び出し、42501（HTTP 401）で
 --     拒否されることを実測した。
 -- ============================================================================
+
+
+-- ============================================================================
+-- 追記（2026-07-29）: migration 022（publicスキーマの既定権限）の検証
+--
+-- 022の自己検査は、テーブルと関数については残存を検知して例外を送出するが、
+-- シーケンスについては値をRAISE NOTICEで表示するのみで判定していなかった。
+-- 3種すべてを同一基準で判定するよう、本ファイルへ検証を追加する。
+--
+-- 判定パターンは、postgres=... や service_role=... を誤検知しないよう
+-- `,anon=` / `{anon=` の形で厳密に照合する（022適用時に同種の誤検知で
+-- migration全体がロールバックされた経緯があるため）。
+-- ============================================================================
+DO $$
+DECLARE
+    v_type   text;
+    v_acl    text;
+    v_bad    text := '';
+BEGIN
+    FOR v_type, v_acl IN
+        SELECT CASE defaclobjtype
+                 WHEN 'r' THEN 'TABLES' WHEN 'S' THEN 'SEQUENCES' WHEN 'f' THEN 'FUNCTIONS'
+                 ELSE defaclobjtype::text END,
+               defaclacl::text
+          FROM pg_default_acl
+         WHERE defaclrole = 'postgres'::regrole
+           AND defaclnamespace = 'public'::regnamespace
+    LOOP
+        IF v_acl LIKE '%,anon=%' OR v_acl LIKE '{anon=%'
+           OR v_acl LIKE '%,authenticated=%' OR v_acl LIKE '{authenticated=%' THEN
+            v_bad := v_bad || format('[%s: %s] ', v_type, v_acl);
+        END IF;
+    END LOOP;
+
+    IF v_bad <> '' THEN
+        RAISE EXCEPTION '022 verification failed: default ACL still grants anon/authenticated -> %', v_bad;
+    END IF;
+
+    RAISE NOTICE '022 verification passed: TABLES/SEQUENCES/FUNCTIONS default ACLs grant neither anon nor authenticated';
+END;
+$$;
