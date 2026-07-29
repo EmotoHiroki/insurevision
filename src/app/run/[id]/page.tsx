@@ -236,30 +236,12 @@ export default function RunDetailPage() {
         setSaving(true)
         try {
             const supabase = createClient()
-            await supabase.from('candidate').update({
-                status: 'excluded',
-                exclusion_reason_code: exclusionReasonCode || null,
-                excluded_reason: exclusionReason.trim() || null,
-                excluded_by: operator.id,
-                excluded_at: new Date().toISOString(),
-            }).eq('id', candidateId)
-
-            // M1: exclusion_reason_recorded (always)
-            await supabase.from('audit_event').insert({
-                run_id: runId,
-                event_type: 'exclusion_reason_recorded',
-                operator_id: operator.id,
-                payload: { candidate_id: candidateId, reason: exclusionReason.trim() || null },
+            const { error: rpcErr } = await supabase.rpc('exclude_candidate', {
+                p_candidate_id: candidateId,
+                p_reason_code: exclusionReasonCode || null,
+                p_reason_text: exclusionReason.trim() || null,
             })
-            // G-4: exclusion_reason_coded (when R-code selected)
-            if (exclusionReasonCode) {
-                await supabase.from('audit_event').insert({
-                    run_id: runId,
-                    event_type: 'exclusion_reason_coded',
-                    operator_id: operator.id,
-                    payload: { candidate_id: candidateId, code: exclusionReasonCode, memo: exclusionReason.trim() || null },
-                })
-            }
+            if (rpcErr) throw rpcErr
 
             setExcludingId(null)
             setExclusionReason('')
@@ -325,8 +307,15 @@ export default function RunDetailPage() {
     const handleUpdateCoverageStatus = async (candidateId: string, status: CoverageStatus) => {
         setUpdatingCoverage(candidateId)
         const supabase = createClient()
-        await supabase.from('candidate').update({ coverage_status: status }).eq('id', candidateId)
-        setCandidates(prev => prev.map(c => c.id === candidateId ? { ...c, coverage_status: status } : c))
+        const { error: rpcErr } = await supabase.rpc('update_candidate_coverage_status', {
+            p_candidate_id: candidateId,
+            p_status: status,
+        })
+        if (!rpcErr) {
+            setCandidates(prev => prev.map(c => c.id === candidateId ? { ...c, coverage_status: status } : c))
+        } else {
+            showToast(rpcErr.message, 'error')
+        }
         setUpdatingCoverage(null)
     }
 
