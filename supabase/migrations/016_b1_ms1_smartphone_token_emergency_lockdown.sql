@@ -8,7 +8,7 @@
 --
 -- 自己検査（RLS有効・FORCE有効・ポリシー0件・残存権限なしの確認）は、
 -- 本ファイルには含めない。理由と詳細は
--- `supabase/verification/016_017_post_apply_checks.sql` を参照。
+-- `supabase/verification/post_apply_checks_016_017_022.sql` を参照。
 -- 本ファイル単体を新規DBへ通し適用した場合の状態は、上記検証ファイルを
 -- 続けて実行することで確認できる。
 --

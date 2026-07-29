@@ -10,7 +10,7 @@
 -- （田島様2026-07-27 23:41ご指摘4に対応。016と記載方法を統一）。
 --
 -- 自己検査は本ファイルに含めない。詳細は
--- `supabase/verification/016_017_post_apply_checks.sql` を参照。
+-- `supabase/verification/post_apply_checks_016_017_022.sql` を参照。
 --
 -- 目的: SECURITY DEFINER 関数に対する PUBLIC / anon の EXECUTE 権限を剥奪する。
 --
