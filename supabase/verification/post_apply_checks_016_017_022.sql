@@ -179,3 +179,45 @@ BEGIN
     RAISE NOTICE '022 verification passed: TABLES/SEQUENCES/FUNCTIONS default ACLs grant neither anon nor authenticated';
 END;
 $$;
+
+
+-- ============================================================================
+-- 追記（2026-07-29）: migration 024 の自己検査
+-- 016・017と同じ方針で、migration本体から分離して本ファイルへ移設した。
+-- ============================================================================
+-- ── 自己検査 ────────────────────────────────────────────────────────────
+DO $$
+DECLARE v_bad text;
+BEGIN
+    IF has_table_privilege('authenticated','public.candidate','UPDATE') THEN
+        RAISE EXCEPTION '024 self-check failed: authenticated still has table-wide UPDATE on candidate';
+    END IF;
+    IF has_table_privilege('authenticated','public.snapshot','UPDATE') THEN
+        RAISE EXCEPTION '024 self-check failed: authenticated still has table-wide UPDATE on snapshot';
+    END IF;
+    IF has_column_privilege('authenticated','public.snapshot','unresolved_items','UPDATE') THEN
+        RAISE EXCEPTION '024 self-check failed: authenticated still has UPDATE on snapshot.unresolved_items';
+    END IF;
+    IF NOT has_column_privilege('authenticated','public.snapshot','redundancy_decisions','UPDATE') THEN
+        RAISE EXCEPTION '024 self-check failed: authenticated lost UPDATE on snapshot.redundancy_decisions';
+    END IF;
+    IF NOT has_column_privilege('authenticated','public.snapshot','resolution_memo','UPDATE') THEN
+        RAISE EXCEPTION '024 self-check failed: authenticated lost UPDATE on snapshot.resolution_memo';
+    END IF;
+
+    IF NOT has_function_privilege('authenticated','public.exclude_candidate(uuid,text,text)','EXECUTE') THEN
+        RAISE EXCEPTION '024 self-check failed: authenticated missing EXECUTE on exclude_candidate';
+    END IF;
+    IF has_function_privilege('anon','public.exclude_candidate(uuid,text,text)','EXECUTE') THEN
+        RAISE EXCEPTION '024 self-check failed: anon has EXECUTE on exclude_candidate';
+    END IF;
+    IF NOT has_function_privilege('authenticated','public.update_candidate_coverage_status(uuid,text)','EXECUTE') THEN
+        RAISE EXCEPTION '024 self-check failed: authenticated missing EXECUTE on update_candidate_coverage_status';
+    END IF;
+    IF has_function_privilege('anon','public.update_candidate_coverage_status(uuid,text)','EXECUTE') THEN
+        RAISE EXCEPTION '024 self-check failed: anon has EXECUTE on update_candidate_coverage_status';
+    END IF;
+
+    RAISE NOTICE '024 self-check passed';
+END;
+$$;

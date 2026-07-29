@@ -1,50 +1,27 @@
 -- ============================================================================
--- 024_b1_ms1_candidate_write_functions_and_column_lockdown.sql
+-- 024 台帳 statements 列 訂正SQL（第2版・全文版）
 --
--- 状態: 本番適用済み
+-- 【本ファイルを実行してください】
 --
--- 背景（田島様ご指摘「snapshot.unresolved_items等の確定条件列と、candidateの
--- 判定・状態関連列については、agencyスコープ化だけでは同一代理店内からの
--- 直接書換えが残ります。直接UPDATEの制限と照合付き書込経路を、第3段階の
--- 恒久是正に含めてください」への対応）。
+-- 経緯:
+--   第1版の訂正SQLでは、2つのCREATE FUNCTION文について本体を
+--   `$$ ... $$` という省略形で格納していた。これは「要約文字列を格納していた」
+--   という当初の不備と本質的に同じであり、田島様ご指摘4の「本番で実行したSQL・
+--   台帳の内容・リポジトリファイル・検証SQLの4者を一致させる」を満たさない。
 --
--- アプリコードを確認した結果:
---   - `snapshot.unresolved_items` は `run/new` でのスナップショット作成時に
---     一度だけ書き込まれ、その後の更新経路はアプリ内に一切存在しない。
---   - `snapshot.redundancy_decisions`・`resolution_memo` は現行アプリで
---     直接UPDATEされている、確定条件そのものではない実利用中の列。
---   - `candidate.status`・`excluded_reason`・`exclusion_reason_code`・
---     `excluded_by`・`excluded_at`・`coverage_status` は
---     `handleExcludeCandidate`・`handleUpdateCoverageStatus`
---     （src/app/run/[id]/page.tsx）から直接UPDATEされていた。
---   - candidateには上記以外の直接UPDATE経路は存在しない。
+--   また第1版の自己検査は「配列長11以上」「特定の文字列を含まない」しか判定して
+--   おらず、本体が省略されたままでも通過する弱い検査だった。本版では各文の長さと
+--   省略記号の有無、および関数本体の要となる照合ロジックの有無まで判定する。
 --
--- 重要な実装上の訂正（適用時に判明）:
---   当初 `REVOKE UPDATE (列名, ...) ON TABLE ... FROM authenticated` の形で
---   列単位のみ剥奪しようとしたが、実測の結果これは無効だった。
---   authenticated は snapshot・candidate 双方にテーブル全体のUPDATE権限を
---   （USING(true)時代からのGRANTとして）保持したままであり、PostgreSQLの
---   権限は加算的であるため、テーブル全体のGRANTが残っている限り列単位の
---   REVOKEは上書きされず、直接UPDATEが成立し続けることを実測で確認した
---   （実際に candidate.status・snapshot.unresolved_items への直接PATCHが
---   204で成立し、値が変更されることを確認）。
---   正しい手順は、テーブル全体のUPDATE権限を先に剥奪したうえで、
---   必要な列のみ列単位でGRANTし直すことである。本ファイルは訂正後の
---   正しい手順を記載している。
---
--- 対応:
---   1. candidate: テーブル全体のUPDATE権限を剥奪。直接UPDATEの経路を
---      全廃し、以下の2関数経由に統一する。
---   2. snapshot: テーブル全体のUPDATE権限を剥奪したうえで、
---      redundancy_decisions・resolution_memo のみ列単位で再GRANTする。
---      unresolved_items は再GRANTしない（直接UPDATE経路が存在しないため）。
---   3. アプリコード（src/app/run/[id]/page.tsx）を、直接UPDATEから
---      該当関数の呼出しへ変更（同一コミットに含む）。
+-- 本SQLは migrations/024_..._lockdown.sql の実DDL 11文をそのまま格納する
+-- （同ファイルからプログラムで抽出。手書き転記はしていない）。
+-- DDLの再実行は行わず、台帳の記録内容のみを更新する。
 -- ============================================================================
 
--- ── 0. audit_event.event_type のCHECK制約に新規イベント種別を追加 ─────────
-ALTER TABLE public.audit_event DROP CONSTRAINT audit_event_event_type_check;
-ALTER TABLE public.audit_event ADD CONSTRAINT audit_event_event_type_check
+UPDATE supabase_migrations.schema_migrations
+SET statements = ARRAY[
+  $led1$ALTER TABLE public.audit_event DROP CONSTRAINT audit_event_event_type_check$led1$,
+  $led2$ALTER TABLE public.audit_event ADD CONSTRAINT audit_event_event_type_check
   CHECK (event_type = ANY (ARRAY[
     'issue_shared','manual_review_completed','insurer_list_presented','customer_intent_confirmed',
     'compare_presented','exclusion_reason_recorded','comparison_waiver_confirmed','consent_important_matters',
@@ -57,10 +34,8 @@ ALTER TABLE public.audit_event ADD CONSTRAINT audit_event_event_type_check
     'insurance_category_selected','insurance_line_selected','contract_flow_selected','case_phase_changed',
     'property_profile_recorded','ideal_coverage_diagnosed','intent_inferred','intent_finalized',
     'coverage_overlap_checked','candidate_coverage_status_updated'
-  ]::text[]));
-
--- ── 1. candidateの除外処理・補償状況更新を照合付き関数に集約 ──────────────
-CREATE OR REPLACE FUNCTION public.exclude_candidate(
+  ]::text[]))$led2$,
+  $led3$CREATE OR REPLACE FUNCTION public.exclude_candidate(
     p_candidate_id uuid,
     p_reason_code text DEFAULT NULL,
     p_reason_text text DEFAULT NULL
@@ -115,12 +90,10 @@ BEGIN
           FROM public.candidate c WHERE c.id = p_candidate_id;
     END IF;
 END;
-$$;
-
-REVOKE EXECUTE ON FUNCTION public.exclude_candidate(uuid, text, text) FROM PUBLIC, anon;
-GRANT  EXECUTE ON FUNCTION public.exclude_candidate(uuid, text, text) TO authenticated;
-
-CREATE OR REPLACE FUNCTION public.update_candidate_coverage_status(
+$$$led3$,
+  $led4$REVOKE EXECUTE ON FUNCTION public.exclude_candidate(uuid, text, text) FROM PUBLIC, anon$led4$,
+  $led5$GRANT  EXECUTE ON FUNCTION public.exclude_candidate(uuid, text, text) TO authenticated$led5$,
+  $led6$CREATE OR REPLACE FUNCTION public.update_candidate_coverage_status(
     p_candidate_id uuid,
     p_status text
 ) RETURNS void
@@ -161,18 +134,63 @@ BEGIN
     VALUES (v_run_id, 'candidate_coverage_status_updated', v_operator_id,
             jsonb_build_object('candidate_id', p_candidate_id, 'status', p_status));
 END;
-$$;
+$$$led6$,
+  $led7$REVOKE EXECUTE ON FUNCTION public.update_candidate_coverage_status(uuid, text) FROM PUBLIC, anon$led7$,
+  $led8$GRANT  EXECUTE ON FUNCTION public.update_candidate_coverage_status(uuid, text) TO authenticated$led8$,
+  $led9$REVOKE UPDATE ON TABLE public.candidate FROM authenticated$led9$,
+  $led10$REVOKE UPDATE ON TABLE public.snapshot FROM authenticated$led10$,
+  $led11$GRANT UPDATE (redundancy_decisions, resolution_memo) ON TABLE public.snapshot TO authenticated$led11$
+]
+WHERE version = '20260729000002';
 
-REVOKE EXECUTE ON FUNCTION public.update_candidate_coverage_status(uuid, text) FROM PUBLIC, anon;
-GRANT  EXECUTE ON FUNCTION public.update_candidate_coverage_status(uuid, text) TO authenticated;
 
--- ── 2. candidate: テーブル全体のUPDATEを剥奪（直接UPDATE経路を全廃） ──────
-REVOKE UPDATE ON TABLE public.candidate FROM authenticated;
+-- ── 自己検査（第1版より厳格化）────────────────────────────────────────────
+DO $verify$
+DECLARE
+    v_cnt      int;
+    v_ellipsis text;
+    v_excl_len int;
+    v_upd_len  int;
+    v_missing  text;
+BEGIN
+    SELECT array_length(statements,1) INTO v_cnt
+      FROM supabase_migrations.schema_migrations WHERE version='20260729000002';
+    IF v_cnt <> 11 THEN
+        RAISE EXCEPTION '024 ledger: expected 11 statements, found %', v_cnt;
+    END IF;
 
--- ── 3. snapshot: テーブル全体のUPDATEを剥奪し、実利用中の2列のみ再GRANT ──
--- unresolved_items は意図的に再GRANTしない（直接更新経路がアプリに存在しないため）。
-REVOKE UPDATE ON TABLE public.snapshot FROM authenticated;
-GRANT UPDATE (redundancy_decisions, resolution_memo) ON TABLE public.snapshot TO authenticated;
+    SELECT string_agg(format('#%s', i), ', ') INTO v_ellipsis
+      FROM supabase_migrations.schema_migrations sm,
+           LATERAL unnest(sm.statements) WITH ORDINALITY AS t(stmt, i)
+     WHERE sm.version='20260729000002'
+       AND (stmt LIKE '%$$ ... $$%' OR stmt LIKE '%see repo file%');
+    IF v_ellipsis IS NOT NULL THEN
+        RAISE EXCEPTION '024 ledger: abbreviated statements remain at %', v_ellipsis;
+    END IF;
 
--- 自己検査（DOブロック）は、田島様2026-07-28ご指摘4の方針に従い本ファイルから分離し、
--- supabase/verification/post_apply_checks_016_017_022.sql へ移設した（016・017と同一の扱い）。
+    SELECT max(length(stmt)) INTO v_excl_len
+      FROM supabase_migrations.schema_migrations sm, LATERAL unnest(sm.statements) AS stmt
+     WHERE sm.version='20260729000002' AND stmt LIKE '%FUNCTION public.exclude_candidate%';
+    SELECT max(length(stmt)) INTO v_upd_len
+      FROM supabase_migrations.schema_migrations sm, LATERAL unnest(sm.statements) AS stmt
+     WHERE sm.version='20260729000002' AND stmt LIKE '%FUNCTION public.update_candidate_coverage_status%';
+
+    IF v_excl_len IS NULL OR v_excl_len < 1500 THEN
+        RAISE EXCEPTION '024 ledger: exclude_candidate body looks truncated (len=%)', v_excl_len;
+    END IF;
+    IF v_upd_len IS NULL OR v_upd_len < 1000 THEN
+        RAISE EXCEPTION '024 ledger: update_candidate_coverage_status body looks truncated (len=%)', v_upd_len;
+    END IF;
+
+    SELECT string_agg(k, ', ') INTO v_missing
+      FROM unnest(ARRAY['auth.uid()', 'is_active = true', 'RAISE EXCEPTION']) AS k
+     WHERE NOT EXISTS (
+        SELECT 1 FROM supabase_migrations.schema_migrations sm, LATERAL unnest(sm.statements) AS stmt
+         WHERE sm.version='20260729000002' AND stmt LIKE '%'||k||'%');
+    IF v_missing IS NOT NULL THEN
+        RAISE EXCEPTION '024 ledger: function body missing expected logic: %', v_missing;
+    END IF;
+
+    RAISE NOTICE '024 ledger verified: 11 statements, no abbreviation, exclude_candidate=% chars, update_candidate_coverage_status=% chars', v_excl_len, v_upd_len;
+END;
+$verify$;
