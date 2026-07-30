@@ -1045,9 +1045,9 @@ export default function RunDetailPage() {
                                                 ) : (
                                                     isEditable && (
                                                         <div style={{ display: 'flex', flexDirection: 'column', gap: 6 }}>
-                                                            <button disabled title={locale === 'ja' ? 'migration 016によりトークン発行を一時停止中（第4段階の完成待ち）' : 'Token issuance temporarily suspended pending stage 4'}
-                                                                style={{ padding: '6px 12px', background: '#f3f4f6', color: '#9ca3af', border: '1px solid #e5e7eb', borderRadius: 6, fontSize: 12, cursor: 'not-allowed' }}>
-                                                                {locale === 'ja' ? 'リンク発行（準備中）' : 'Generate Link (Preparing)'}
+                                                            <button onClick={() => handleGenerateSmartphoneUrl('recruiter')}
+                                                                style={{ padding: '6px 12px', background: '#eff6ff', color: '#1d4ed8', border: '1px solid #bfdbfe', borderRadius: 6, fontSize: 12, cursor: 'pointer' }}>
+                                                                {locale === 'ja' ? 'リンク発行' : 'Generate Link'}
                                                             </button>
                                                             <button onClick={() => handleRecordSmartphone('recruiter')} disabled={savingSmartphone}
                                                                 style={{ padding: '6px 12px', background: '#1d4ed8', color: 'white', border: 'none', borderRadius: 6, fontSize: 12, cursor: 'pointer' }}>
@@ -1066,9 +1066,9 @@ export default function RunDetailPage() {
                                                 ) : (
                                                     isEditable && (
                                                         <div style={{ display: 'flex', flexDirection: 'column', gap: 6 }}>
-                                                            <button disabled title={locale === 'ja' ? 'migration 016によりトークン発行を一時停止中（第4段階の完成待ち）' : 'Token issuance temporarily suspended pending stage 4'}
-                                                                style={{ padding: '6px 12px', background: '#f3f4f6', color: '#9ca3af', border: '1px solid #e5e7eb', borderRadius: 6, fontSize: 12, cursor: 'not-allowed' }}>
-                                                                {locale === 'ja' ? 'リンク発行（準備中）' : 'Generate Link (Preparing)'}
+                                                            <button onClick={() => handleGenerateSmartphoneUrl('customer')}
+                                                                style={{ padding: '6px 12px', background: '#eff6ff', color: '#1d4ed8', border: '1px solid #bfdbfe', borderRadius: 6, fontSize: 12, cursor: 'pointer' }}>
+                                                                {locale === 'ja' ? 'リンク発行' : 'Generate Link'}
                                                             </button>
                                                             <button onClick={() => handleRecordSmartphone('customer')} disabled={savingSmartphone}
                                                                 style={{ padding: '6px 12px', background: '#1d4ed8', color: 'white', border: 'none', borderRadius: 6, fontSize: 12, cursor: 'pointer' }}>

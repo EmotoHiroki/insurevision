@@ -4,6 +4,13 @@ import type { SmartphoneConfStatus } from '@/lib/types'
 // POST /api/smartphone-confirm
 // Body: { token: string }
 // Token encodes run_id + role -- no run_id exposed in URL
+//
+// b1-MS1 Stage 4: this route is called by an unauthenticated visitor (the
+// customer or recruiter's own phone, no InsureVision login). Both GET and POST
+// now go through SECURITY DEFINER functions granted to anon, which validate
+// the token (unused, not expired) and only reveal/mutate run data through
+// those functions -- direct table access remains fully revoked for anon.
+// See migration 031_b1_ms1_smartphone_confirm_functions_stage4.sql.
 export async function POST(request: Request) {
     try {
         const { token } = await request.json() as { token: string }
@@ -11,56 +18,20 @@ export async function POST(request: Request) {
 
         const supabase = await createServerSupabaseClient()
 
-        const { data: tok, error: tokErr } = await supabase
-            .from('smartphone_confirm_token')
-            .select('id, run_id, role, expires_at, used_at')
-            .eq('id', token)
-            .single()
+        const { data, error } = await supabase
+            .rpc('confirm_smartphone', { p_token_id: token })
+            .single<{ success: boolean; status: SmartphoneConfStatus }>()
 
-        if (tokErr || !tok) return Response.json({ error: 'invalid token' }, { status: 404 })
-        if (tok.used_at) return Response.json({ error: 'token already used' }, { status: 409 })
-        if (new Date(tok.expires_at) < new Date()) {
-            return Response.json({ error: 'token expired' }, { status: 410 })
+        if (error || !data) {
+            const message = error?.message ?? 'confirmation failed'
+            const status = message.includes('already used') ? 409
+                : message.includes('expired') ? 410
+                : message.includes('invalid token') ? 404
+                : 400
+            return Response.json({ error: message }, { status })
         }
 
-        const { data: run, error: runErr } = await supabase
-            .from('run').select('id, run_status, operator_id').eq('id', tok.run_id).single()
-        if (runErr || !run) return Response.json({ error: 'run not found' }, { status: 404 })
-        if (run.run_status !== 'draft') {
-            return Response.json({ error: 'run not editable' }, { status: 400 })
-        }
-
-        const now = new Date().toISOString()
-        const role = tok.role as 'recruiter' | 'customer'
-
-        let newStatus: SmartphoneConfStatus
-        let updatePayload: Record<string, unknown>
-        let eventType: 'recruiter_smartphone_confirmed' | 'customer_smartphone_confirmed'
-
-        if (role === 'recruiter') {
-            newStatus = 'recruiter_confirmed'
-            updatePayload = { smartphone_conf_status: newStatus, recruiter_smartphone_confirmed_at: now }
-            eventType = 'recruiter_smartphone_confirmed'
-        } else {
-            newStatus = 'customer_confirmed'
-            updatePayload = { smartphone_conf_status: newStatus, customer_smartphone_confirmed_at: now }
-            eventType = 'customer_smartphone_confirmed'
-        }
-
-        const { error: upErr } = await supabase.from('run').update(updatePayload).eq('id', tok.run_id)
-        if (upErr) return Response.json({ error: upErr.message }, { status: 500 })
-
-        // Mark token as used
-        await supabase.from('smartphone_confirm_token').update({ used_at: now }).eq('id', token)
-
-        await supabase.from('audit_event').insert({
-            run_id: tok.run_id,
-            event_type: eventType,
-            operator_id: run.operator_id,
-            payload: { role, confirmed_at: now, token_id: token, source: 'smartphone_token' },
-        })
-
-        return Response.json({ success: true, status: newStatus })
+        return Response.json({ success: true, status: data.status })
     } catch (err: unknown) {
         return Response.json(
             { error: err instanceof Error ? err.message : 'Internal server error' },
@@ -79,36 +50,36 @@ export async function GET(request: Request) {
 
         const supabase = await createServerSupabaseClient()
 
-        const { data: tok, error: tokErr } = await supabase
-            .from('smartphone_confirm_token')
-            .select('id, run_id, role, expires_at, used_at')
-            .eq('id', token)
-            .single()
+        const { data, error } = await supabase
+            .rpc('get_smartphone_confirm_status', { p_token_id: token })
+            .single<{
+                is_valid: boolean
+                is_used: boolean
+                is_expired: boolean
+                role: 'recruiter' | 'customer'
+                confirmed_at: string | null
+                run_id: string | null
+                customer_ref: string | null
+                customer_name: string | null
+                recruiter_smartphone_confirmed_at: string | null
+                customer_smartphone_confirmed_at: string | null
+            }>()
 
-        if (tokErr || !tok) return Response.json({ error: 'invalid token' }, { status: 404 })
-
-        const isUsed = !!tok.used_at
-        const isExpired = new Date(tok.expires_at) < new Date()
-        const isValid = !isUsed && !isExpired
-
-        // Only return run info for valid tokens -- expired/used tokens must not leak customer data
-        let run = null
-        if (isValid) {
-            const { data } = await supabase
-                .from('run')
-                .select('id, customer_ref, customer_name, recruiter_smartphone_confirmed_at, customer_smartphone_confirmed_at')
-                .eq('id', tok.run_id)
-                .single()
-            run = data ?? null
-        }
+        if (error || !data) return Response.json({ error: 'invalid token' }, { status: 404 })
 
         return Response.json({
-            valid: isValid,
-            used: isUsed,
-            expired: isExpired,
-            role: tok.role,
-            confirmed_at: tok.used_at ?? null,
-            run,
+            valid: data.is_valid,
+            used: data.is_used,
+            expired: data.is_expired,
+            role: data.role,
+            confirmed_at: data.confirmed_at,
+            run: data.is_valid ? {
+                id: data.run_id,
+                customer_ref: data.customer_ref,
+                customer_name: data.customer_name,
+                recruiter_smartphone_confirmed_at: data.recruiter_smartphone_confirmed_at,
+                customer_smartphone_confirmed_at: data.customer_smartphone_confirmed_at,
+            } : null,
         })
     } catch (err: unknown) {
         return Response.json(

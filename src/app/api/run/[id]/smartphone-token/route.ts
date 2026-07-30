@@ -3,6 +3,12 @@ import { createServerSupabaseClient } from '@/lib/supabase/server'
 // POST /api/run/[id]/smartphone-token
 // Body: { role: 'recruiter' | 'customer' }
 // Returns: { token: string, url: string, expires_at: string }
+//
+// b1-MS1 Stage 4: token issuance now goes through issue_smartphone_confirm_token,
+// a SECURITY DEFINER function that derives the caller's operator identity from
+// auth.uid() and verifies agency ownership of the run, rather than relying on
+// direct table INSERT (which 016 revoked for anon/authenticated). See migration
+// 031_b1_ms1_smartphone_confirm_functions_stage4.sql.
 export async function POST(
     request: Request,
     { params }: { params: Promise<{ id: string }> }
@@ -20,27 +26,18 @@ export async function POST(
 
         const supabase = await createServerSupabaseClient()
 
-        const { data: run, error: runErr } = await supabase
-            .from('run').select('id, run_status, meeting_scene').eq('id', runId).single()
-        if (runErr || !run) return Response.json({ error: 'run not found' }, { status: 404 })
-        if (run.run_status !== 'draft') {
-            return Response.json({ error: 'run not editable' }, { status: 400 })
-        }
+        const { data, error } = await supabase
+            .rpc('issue_smartphone_confirm_token', { p_run_id: runId, p_role: role })
+            .single<{ token_id: string; expires_at: string }>()
 
-        const { data: token, error: tokenErr } = await supabase
-            .from('smartphone_confirm_token')
-            .insert({ run_id: runId, role })
-            .select('id, expires_at')
-            .single()
-
-        if (tokenErr || !token) {
-            return Response.json({ error: 'failed to create token' }, { status: 500 })
+        if (error || !data) {
+            return Response.json({ error: error?.message ?? 'failed to create token' }, { status: 400 })
         }
 
         const origin = new URL(request.url).origin
-        const url = `${origin}/run/smartphone?token=${token.id}`
+        const url = `${origin}/run/smartphone?token=${data.token_id}`
 
-        return Response.json({ token: token.id, url, expires_at: token.expires_at })
+        return Response.json({ token: data.token_id, url, expires_at: data.expires_at })
     } catch (err: unknown) {
         return Response.json(
             { error: err instanceof Error ? err.message : 'Internal server error' },
