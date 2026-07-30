@@ -107,6 +107,9 @@ export default function RunDetailPage() {
     const [savingMemo, setSavingMemo] = useState(false)
     // M2 Spec 1: coverage_status update
     const [updatingCoverage, setUpdatingCoverage] = useState<string | null>(null)
+    // A5 fix: synchronous in-flight guard (React state alone isn't checked until a re-render,
+    // which is too late to stop a fast double-click / double-fire — see handleUpdateCoverageStatus)
+    const updatingCoverageRef = React.useRef<string | null>(null)
     // D-B / G-10: delivery record
     const [deliveryMethod, setDeliveryMethod] = useState<string>('')
     const [deliveryConfirmed, setDeliveryConfirmed] = useState(false)
@@ -304,19 +307,35 @@ export default function RunDetailPage() {
     }
 
     // M2 Spec 1: update coverage_status on a candidate
+    // A5 fix: `disabled={updatingCoverage === c.id}` on the button only takes effect after a
+    // React re-render, so a fast real double-click (or double-fire) can enter this function
+    // twice before the first call's setUpdatingCoverage is ever painted. Guard synchronously
+    // with a ref (checked/set before any await) so the second call returns immediately instead
+    // of firing a second RPC + audit_event. Also short-circuit when the requested status
+    // already matches the candidate's current status, matching the existing "re-selecting an
+    // already-selected value is a no-op" expectation and avoiding a duplicate audit row.
     const handleUpdateCoverageStatus = async (candidateId: string, status: CoverageStatus) => {
+        if (updatingCoverageRef.current === candidateId) return
+        const current = candidates.find(c => c.id === candidateId)
+        if (current && current.coverage_status === status) return
+
+        updatingCoverageRef.current = candidateId
         setUpdatingCoverage(candidateId)
-        const supabase = createClient()
-        const { error: rpcErr } = await supabase.rpc('update_candidate_coverage_status', {
-            p_candidate_id: candidateId,
-            p_status: status,
-        })
-        if (!rpcErr) {
-            setCandidates(prev => prev.map(c => c.id === candidateId ? { ...c, coverage_status: status } : c))
-        } else {
-            showToast(rpcErr.message, 'error')
+        try {
+            const supabase = createClient()
+            const { error: rpcErr } = await supabase.rpc('update_candidate_coverage_status', {
+                p_candidate_id: candidateId,
+                p_status: status,
+            })
+            if (!rpcErr) {
+                setCandidates(prev => prev.map(c => c.id === candidateId ? { ...c, coverage_status: status } : c))
+            } else {
+                showToast(rpcErr.message, 'error')
+            }
+        } finally {
+            updatingCoverageRef.current = null
+            setUpdatingCoverage(null)
         }
-        setUpdatingCoverage(null)
     }
 
     // G-10: save delivery record
