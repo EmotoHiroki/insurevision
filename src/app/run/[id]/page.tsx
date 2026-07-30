@@ -372,7 +372,12 @@ export default function RunDetailPage() {
         const updated = redundancyDecisions.filter(d => d.item_key !== itemKey)
         updated.push({ item_key: itemKey, decision, reason })
         const supabase = createClient()
-        await supabase.from('snapshot').update({ redundancy_decisions: updated }).eq('id', snapshot.id)
+        // b1-MS1 #40横展開: snapshotの直接updateは権限剥奪により失敗するため、
+        // agency照合・確定後凍結を行うRPC経由に変更（migration 032）。
+        await supabase.rpc('update_snapshot_redundancy_decisions', {
+            p_snapshot_id: snapshot.id,
+            p_redundancy_decisions: updated,
+        })
         await supabase.from('audit_event').insert({
             run_id: runId,
             event_type: 'redundancy_resolution_recorded' as const,
@@ -388,7 +393,10 @@ export default function RunDetailPage() {
         if (!snapshot) return
         const updated = redundancyDecisions.filter(d => d.item_key !== itemKey)
         const supabase = createClient()
-        await supabase.from('snapshot').update({ redundancy_decisions: updated }).eq('id', snapshot.id)
+        await supabase.rpc('update_snapshot_redundancy_decisions', {
+            p_snapshot_id: snapshot.id,
+            p_redundancy_decisions: updated,
+        })
         setRedundancyDecisions(updated)
     }
 
@@ -1732,7 +1740,10 @@ export default function RunDetailPage() {
                                                 if (!snapshot) return
                                                 setSavingMemo(true)
                                                 const supabase = createClient()
-                                                await supabase.from('snapshot').update({ resolution_memo: resolutionMemo || null }).eq('id', snapshot.id)
+                                                await supabase.rpc('update_snapshot_resolution_memo', {
+                                                    p_snapshot_id: snapshot.id,
+                                                    p_resolution_memo: resolutionMemo || null,
+                                                })
                                                 setSavingMemo(false)
                                                 showToast(locale === 'ja' ? 'メモを保存しました' : 'Memo saved')
                                             }}
