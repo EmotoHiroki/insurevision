@@ -14,7 +14,7 @@ import { createClient } from '@/lib/supabase/client'
 import { useLocale } from '@/lib/locale-context'
 import {
     OWNERSHIP_TYPES, ownershipTypeLabel, floodRiskLabel,
-    emptyPropertyAttributes, isPropertyProfileComplete, isIndividualAttributes,
+    emptyPropertyAttributes, isIndividualAttributes,
     deriveScheduleReference, normalizePropertyAttributes, isValidPropertyCount,
     type OwnershipType, type PropertyAttributes,
     type IndividualPropertyAttributes, type CorporatePropertyAttributes,
@@ -66,35 +66,21 @@ export default function PropertyProfilePage() {
         setError('')
         try {
             const supabase = createClient()
-            const { data: { user } } = await supabase.auth.getUser()
-            if (!user) throw new Error('Not authenticated')
-            const { data: op } = await supabase.from('operator').select('id').eq('auth_user_id', user.id).single()
-            if (!op) throw new Error('Operator not found')
 
             // 保存時に正規化（schedule_reference を物件数から再導出してから永続化）
             const normalized = normalizePropertyAttributes(attrs)
 
-            const { error: upsertErr } = await supabase.from('property_profile').upsert({
-                run_id: runId,
-                line_code: 'fire',
-                municipality_code: municipalityCode || null,
-                attributes: normalized,
-            }, { onConflict: 'run_id,line_code' })
-            if (upsertErr) throw upsertErr
-
-            const { error: eventErr } = await supabase.from('audit_event').insert({
-                run_id: runId,
-                event_type: 'property_profile_recorded',
-                operator_id: op.id,
-                payload: {
-                    line_code: 'fire',
-                    customer_type: customerType,
-                    municipality_code: municipalityCode || null,
-                    flood_grade: selectedZone?.flood_grade ?? null,
-                    complete: isPropertyProfileComplete(customerType, normalized),
-                },
+            // b1-MS1 第5段階: property_profile保存とaudit_event記録を単一のRPCで
+            // 一体化し、片方のみ書き込まれる状態を作れないようにする（migration 015）。
+            // 完了状態(complete)はクライアントから送らず、関数内でp_attributesから
+            // 再導出される。
+            const { error: rpcErr } = await supabase.rpc('save_property_profile', {
+                p_run_id: runId,
+                p_line_code: 'fire',
+                p_municipality_code: municipalityCode || null,
+                p_attributes: normalized,
             })
-            if (eventErr) throw eventErr
+            if (rpcErr) throw rpcErr
 
             setAttrs(normalized)
             setSaved(true)
