@@ -43,3 +43,6 @@ next-env.d.ts
 # Python doc-gen script cache
 __pycache__/
 *.pyc
+
+# agent worktrees (transient, never commit)
+.claude/worktrees/
