@@ -1,0 +1,51 @@
+-- ============================================================================
+-- 029_b1_ms1_global_default_privileges_functions.sql
+--
+-- 状態: 本番適用済み
+--
+-- 背景（田島様2026-07-30ご指摘A-2への対応）:
+--   田島様は、022の `ALTER DEFAULT PRIVILEGES FOR ROLE postgres IN SCHEMA
+--   public REVOKE ALL ON FUNCTIONS FROM PUBLIC` について、「関数に標準で
+--   付くPUBLICのEXECUTEは組み込みの既定であり、IN SCHEMA付きのREVOKEでは
+--   この既定を取り消せない。IN SCHEMAを外したグローバル形式が必要」と
+--   ご指摘された。
+--
+--   ご指定の方法（execute_sql経由でテーブル・シーケンス・関数を実際に1件ずつ
+--   作成し、has_table_privilege・has_sequence_privilege・has_function_privilege・
+--   proacl・aclexplodeで確認）で実測した結果、**ご指摘のとおりであることを
+--   確認した**。
+--
+--   実測結果（022適用後・029適用前の状態）:
+--     - 新規テーブル: PUBLIC・anon・authenticatedとも権限なし（022で正しく機能）
+--     - 新規シーケンス: 同上、権限なし（022で正しく機能）
+--     - 新規関数: **PUBLIC・anon・authenticatedとも EXECUTE を保持**
+--       （`proacl` = `{=X/postgres,postgres=X/postgres,service_role=X/postgres}`。
+--       `=X/postgres` の `=` は PUBLIC を表すACL表記）
+--
+--   原因の特定: `pg_default_acl` を確認したところ、022適用後は
+--   `(defaclrole=postgres, defaclnamespace=public, defaclobjtype='f')` の
+--   エントリが `{postgres=X/postgres,service_role=X/postgres}`（PUBLICなし）で
+--   正しく存在していた。それにもかかわらず新規関数にPUBLIC EXECUTEが付与される
+--   ことから、関数についてはこのスキーマスコープのエントリだけでは
+--   PostgreSQLの「関数はデフォルトでPUBLICにEXECUTEを付与する」という
+--   組み込みの既定動作を完全に抑止できないことが分かった。
+--
+--   `ALTER DEFAULT PRIVILEGES FOR ROLE postgres REVOKE ALL ON FUNCTIONS FROM
+--   PUBLIC`（IN SCHEMA句なし・グローバル形式）を試験的に適用したところ、
+--   `pg_default_acl` に `defaclnamespace=0`（スキーマ非依存）の新規エントリが
+--   作成され、以後に作成した関数（2件、別々に検証）はいずれもPUBLICを含む
+--   ACLエントリが一切付与されないことを確認した。
+--
+--   なお、テーブル・シーケンスについては、グローバル形式を追加する前の時点で
+--   既にPUBLIC・anon・authenticatedとも権限なしだったため、同様の追加対応は
+--   不要である（PostgreSQLの組み込み既定はテーブル・シーケンスについては
+--   PUBLICに何も付与しないため、関数固有の問題である）。
+--
+-- 対応: role postgres について、スキーマを限定しないグローバル形式で
+--   関数の既定EXECUTE権限をPUBLICから剥奪する。022のスキーマスコープの
+--   REVOKEはそのまま残す（無害であり、將来他スキーマでの動作保証にはならない
+--   ため）。
+-- ============================================================================
+
+ALTER DEFAULT PRIVILEGES FOR ROLE postgres
+  REVOKE ALL ON FUNCTIONS FROM PUBLIC;
