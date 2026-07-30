@@ -81,11 +81,15 @@ export async function POST(request: Request) {
         const pdfObjectKey = `runs/${runId}/proof.json`
 
         // ── Atomic finalize via RPC ──
+        // b1-MS1 Stage 3: finalize_run now derives the caller's operator identity
+        // from auth.uid() internally (rather than trusting the p_operator_id
+        // argument) and re-validates all finalize conditions server-side, so it
+        // can no longer be bypassed by calling the RPC directly. See migration
+        // 030_b1_ms1_finalize_run_stage3_remediation.sql.
         const { error: rpcErr } = await supabase.rpc('finalize_run', {
             p_run_id: runId,
             p_pdf_object_key: pdfObjectKey,
             p_pdf_sha256: pdfSha256,
-            p_operator_id: operatorId,
             p_consent_comparison_result: consentFlags.comparison_result ?? false,
         })
         if (rpcErr) return Response.json({ error: rpcErr.message }, { status: 500 })
