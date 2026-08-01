@@ -191,10 +191,16 @@ export default function RunDetailPage() {
     useEffect(() => { loadData() }, [loadData])
 
     // B-1: lightweight polling when smartphone confirmation is pending
+    // b1-MS1 #49 (2026-08-01): was only 'pending'/'recruiter_confirmed',
+    // which incorrectly treated a customer-confirms-first run as already
+    // done (polling stopped before the recruiter had confirmed). Any
+    // single-sided confirmation still means "still waiting" - only
+    // 'both_confirmed' (migration 041) means fully done.
     useEffect(() => {
         if (!run) return
         const isPending = run.smartphone_conf_status === 'pending' ||
-            run.smartphone_conf_status === 'recruiter_confirmed'
+            run.smartphone_conf_status === 'recruiter_confirmed' ||
+            run.smartphone_conf_status === 'customer_confirmed'
         if (!isPending || run.run_status !== 'draft') return
         const interval = setInterval(() => { loadData() }, 30000)
         return () => clearInterval(interval)
@@ -1036,7 +1042,7 @@ export default function RunDetailPage() {
                                             <h3 style={{ fontSize: 15, fontWeight: 600, color: '#1d4ed8' }}>
                                                 {locale === 'ja' ? 'スマホ確認導線' : 'Smartphone Confirmation'}
                                             </h3>
-                                            {(run.smartphone_conf_status === 'pending' || run.smartphone_conf_status === 'recruiter_confirmed') && (
+                                            {(run.smartphone_conf_status === 'pending' || run.smartphone_conf_status === 'recruiter_confirmed' || run.smartphone_conf_status === 'customer_confirmed') && (
                                                 <span style={{ fontSize: 11, color: '#6b7280', display: 'flex', alignItems: 'center', gap: 4 }}>
                                                     <LuRefreshCw size={11} className="animate-pulse-soft" />
                                                     {locale === 'ja' ? '30秒ごとに自動更新' : 'Auto-refreshing every 30s'}

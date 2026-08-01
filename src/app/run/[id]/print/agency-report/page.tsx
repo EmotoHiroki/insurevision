@@ -226,10 +226,10 @@ function AgencyReportContent() {
                                 {planDiffExists ? (run.plan_diff_reason ? '差異あり（理由記録済）' : '差異あり（理由未記録）') : '差異なし'}
                             </div>
                         </div>
-                        <div style={{ ...s.statusCard, borderColor: run.smartphone_conf_status === 'customer_confirmed' ? '#86efac' : '#fca5a5' }}>
+                        <div style={{ ...s.statusCard, borderColor: run.smartphone_conf_status === 'both_confirmed' ? '#86efac' : '#fca5a5' }}>
                             <div style={{ fontSize: 8, fontWeight: 700, marginBottom: 3 }}>事後記録</div>
-                            <div style={{ fontSize: 7, color: run.smartphone_conf_status === 'customer_confirmed' ? '#16a34a' : '#dc2626' }}>
-                                スマホ確認: {run.smartphone_conf_status === 'customer_confirmed' ? '完了' : String(run.smartphone_conf_status ?? '未確認')}
+                            <div style={{ fontSize: 7, color: run.smartphone_conf_status === 'both_confirmed' ? '#16a34a' : '#dc2626' }}>
+                                スマホ確認: {run.smartphone_conf_status === 'both_confirmed' ? '完了' : String(run.smartphone_conf_status ?? '未確認')}
                             </div>
                         </div>
                     </div>
@@ -443,8 +443,8 @@ function AgencyReportContent() {
                             <tr>
                                 <td style={s.td}>スマートフォンによる顧客確認</td>
                                 <td style={{ ...s.td, textAlign: 'center' }}>SMS/QR</td>
-                                <td style={{ ...s.td, textAlign: 'center', fontWeight: 700, color: run.smartphone_conf_status === 'customer_confirmed' ? '#15803d' : '#dc2626' }}>
-                                    {run.smartphone_conf_status === 'customer_confirmed' ? '○' : '✗'}
+                                <td style={{ ...s.td, textAlign: 'center', fontWeight: 700, color: run.customer_smartphone_confirmed_at ? '#15803d' : '#dc2626' }}>
+                                    {run.customer_smartphone_confirmed_at ? '○' : '✗'}
                                 </td>
                                 <td style={{ ...s.td, fontSize: 7 }}>
                                     {String(run.smartphone_conf_status ?? '—')}
