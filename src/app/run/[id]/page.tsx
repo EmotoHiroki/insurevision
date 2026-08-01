@@ -540,7 +540,7 @@ export default function RunDetailPage() {
             const res = await fetch(`/api/run/${runId}/smartphone-confirm`, {
                 method: 'POST',
                 headers: { 'Content-Type': 'application/json' },
-                body: JSON.stringify({ operatorId: operator.id, role }),
+                body: JSON.stringify({ role }),
             })
             if (!res.ok) throw new Error((await res.json()).error)
             showToast(locale === 'ja' ? 'スマホ確認を記録しました' : 'Smartphone confirmation recorded')
