@@ -187,13 +187,6 @@ export default function NewRunPage() {
                     operator_id: op.id,
                     payload: { diagnosis_memo: diagnosisMemo },
                 },
-                // insurer_list_presented auto-fires at Step2→Step3 transition for ALL paths
-                {
-                    run_id: runId,
-                    event_type: 'insurer_list_presented' as const,
-                    operator_id: op.id,
-                    payload: { auto_recorded: true },
-                },
                 {
                     run_id: runId,
                     event_type: 'customer_intent_confirmed' as const,
@@ -246,6 +239,13 @@ export default function NewRunPage() {
 
             const { error: eventsErr } = await supabase.from('audit_event').insert(events)
             if (eventsErr) throw eventsErr
+
+            // b1-MS1 #48 (2026-08-01): insurer_list_presented is a finalize_run
+            // precondition, so it can no longer be recorded via direct insert
+            // (migration 039 blocks that at the DB level). Record it through
+            // its dedicated RPC instead.
+            const { error: insurerListErr } = await supabase.rpc('record_insurer_list_presented', { p_run_id: runId })
+            if (insurerListErr) throw insurerListErr
 
             // ── Branch on customer decision ──
             const decision: CustomerDecision = intentData.customerDecision
