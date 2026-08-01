@@ -273,14 +273,8 @@ export default function RunDetailPage() {
         setSaving(true)
         try {
             const supabase = createClient()
-            const now = new Date().toISOString()
-            await supabase.from('run').update({ compare_presented_at: now }).eq('id', runId)
-            await supabase.from('audit_event').insert({
-                run_id: runId,
-                event_type: 'compare_presented',
-                operator_id: operator.id,
-                payload: { presented_at: now },
-            })
+            const { error } = await supabase.rpc('record_compare_presented', { p_run_id: runId })
+            if (error) throw error
             await loadData()
             showToast(locale === 'ja' ? '比較提示を記録しました' : 'Compare presentation recorded')
         } catch (e: unknown) {
