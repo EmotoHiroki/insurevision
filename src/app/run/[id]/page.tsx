@@ -609,7 +609,6 @@ export default function RunDetailPage() {
                 method: 'POST',
                 headers: { 'Content-Type': 'application/json' },
                 body: JSON.stringify({
-                    operatorId: operator.id,
                     recommendedCandidateId: recommendedId || null,
                     decidedCandidateId: decidedId || null,
                     planDiffReason: planDiffReason.trim() || null,
