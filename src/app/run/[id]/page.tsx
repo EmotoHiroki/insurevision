@@ -10,7 +10,7 @@ import { format } from 'date-fns'
 import {
     LuShield, LuGlobe, LuArrowLeft, LuCheck, LuPlus, LuTrash2,
     LuClock, LuUser, LuRefreshCw, LuFileText, LuChartBar, LuLock,
-    LuCircleCheck, LuCircleX, LuDownload, LuTriangle,
+    LuCircleCheck, LuCircleX, LuDownload, LuTriangle, LuHouse,
 } from 'react-icons/lu'
 
 // ─────────────────────────────────────────────
@@ -795,6 +795,12 @@ export default function RunDetailPage() {
                     </span>
                 </div>
                 <div style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
+                    <button onClick={() => router.push(`/run/${runId}/property`)} title={locale === 'ja' ? '物件情報' : 'Property Info'} style={{
+                        background: 'rgba(255,255,255,0.1)', border: 'none', color: 'white',
+                        padding: '6px 12px', borderRadius: 6, cursor: 'pointer', display: 'flex', alignItems: 'center', gap: 4, fontSize: 12,
+                    }}>
+                        <LuHouse size={14} /> {locale === 'ja' ? '物件情報' : 'Property'}
+                    </button>
                     <button onClick={toggleLocale} style={{
                         background: 'rgba(255,255,255,0.1)', border: 'none', color: 'rgba(255,255,255,0.8)',
                         padding: '6px 12px', borderRadius: 6, cursor: 'pointer', display: 'flex', alignItems: 'center', gap: 4, fontSize: 12,
