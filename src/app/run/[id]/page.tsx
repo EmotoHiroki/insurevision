@@ -498,7 +498,7 @@ export default function RunDetailPage() {
             const res = await fetch(`/api/run/${runId}/consent`, {
                 method: 'POST',
                 headers: { 'Content-Type': 'application/json' },
-                body: JSON.stringify({ operatorId: operator.id, status }),
+                body: JSON.stringify({ status }),
             })
             if (!res.ok) throw new Error((await res.json()).error)
             showToast(locale === 'ja' ? '同意ステータスを記録しました' : 'Consent status recorded')
@@ -560,7 +560,7 @@ export default function RunDetailPage() {
             const res = await fetch(`/api/run/${runId}/paper-confirm`, {
                 method: 'POST',
                 headers: { 'Content-Type': 'application/json' },
-                body: JSON.stringify({ operatorId: operator.id }),
+                body: JSON.stringify({}),
             })
             if (!res.ok) throw new Error((await res.json()).error)
             showToast(locale === 'ja' ? '紙面確認を完了しました' : 'Paper confirmation completed')
@@ -580,7 +580,7 @@ export default function RunDetailPage() {
             const res = await fetch(`/api/run/${runId}/important-matters`, {
                 method: 'POST',
                 headers: { 'Content-Type': 'application/json' },
-                body: JSON.stringify({ operatorId: operator.id, deliveryMethod: importantMattersMethod }),
+                body: JSON.stringify({ deliveryMethod: importantMattersMethod }),
             })
             if (!res.ok) throw new Error((await res.json()).error)
             showToast(locale === 'ja' ? '重要事項説明書の交付を記録しました' : 'Important matters delivery recorded')
@@ -640,7 +640,6 @@ export default function RunDetailPage() {
                 headers: { 'Content-Type': 'application/json' },
                 body: JSON.stringify({
                     runId,
-                    operatorId: operator.id,
                     consentFlags: {
                         comparison_result: consentComparisonResult,
                         important_matters: false,

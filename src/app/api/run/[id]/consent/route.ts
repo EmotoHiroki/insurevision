@@ -2,56 +2,35 @@ import { createServerSupabaseClient } from '@/lib/supabase/server'
 import type { ElectronicConsentStatus, ElectronicConsentMethod } from '@/lib/types'
 
 // POST /api/run/[id]/consent
-// Body: { operatorId, status, method? }
+// Body: { status, method? }
+// operatorId は受け取らない。呼出者は record_electronic_consent() が
+// auth.uid() から導出する（migration 048）。run更新とaudit_event記録は
+// 同関数内の単一トランザクションで行われる。
 export async function POST(
     request: Request,
     { params }: { params: Promise<{ id: string }> }
 ) {
     try {
         const { id: runId } = await params
-        const { operatorId, status, method } = await request.json() as {
-            operatorId: string
+        const { status, method } = await request.json() as {
             status: ElectronicConsentStatus
             method?: ElectronicConsentMethod
         }
 
-        if (!runId || !operatorId || !status) {
-            return Response.json({ error: 'runId, operatorId, status required' }, { status: 400 })
+        if (!runId || !status) {
+            return Response.json({ error: 'runId, status required' }, { status: 400 })
         }
 
         const supabase = await createServerSupabaseClient()
+        const { data: { user } } = await supabase.auth.getUser()
+        if (!user) return Response.json({ error: 'unauthorized' }, { status: 401 })
 
-        const { data: run, error: runErr } = await supabase
-            .from('run').select('id, run_status').eq('id', runId).single()
-        if (runErr || !run) return Response.json({ error: 'run not found' }, { status: 404 })
-        if (run.run_status !== 'draft') {
-            return Response.json({ error: 'run not editable' }, { status: 400 })
-        }
-
-        const now = new Date().toISOString()
-
-        const updatePayload: Record<string, unknown> = {
-            electronic_consent_status: status,
-            electronic_consent_confirmed_at: now,
-            electronic_consent_operator_id: operatorId,
-        }
-        if (method) updatePayload.electronic_consent_method = method
-
-        // declined => auto-switch to paper confirmation mode
-        if (status === 'declined') {
-            updatePayload.paper_confirmation_status = 'pending'
-            updatePayload.smartphone_conf_status = 'paper_fallback'
-        }
-
-        const { error: upErr } = await supabase.from('run').update(updatePayload).eq('id', runId)
-        if (upErr) return Response.json({ error: upErr.message }, { status: 500 })
-
-        await supabase.from('audit_event').insert({
-            run_id: runId,
-            event_type: 'electronic_consent_recorded',
-            operator_id: operatorId,
-            payload: { status, method: method ?? null, confirmed_at: now },
+        const { error } = await supabase.rpc('record_electronic_consent', {
+            p_run_id: runId,
+            p_status: status,
+            p_method: method ?? null,
         })
+        if (error) return Response.json({ error: error.message }, { status: 400 })
 
         return Response.json({ success: true })
     } catch (err: unknown) {

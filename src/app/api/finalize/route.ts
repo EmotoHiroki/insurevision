@@ -5,17 +5,19 @@ import type { Run, Snapshot, MinimalProofPdfStub } from '@/lib/types'
 // POST /api/finalize
 // Body: {
 //   runId: string,
-//   operatorId: string,
 //   consentFlags: { comparison_result: boolean, important_matters: boolean, personal_info: boolean },
 //   exceptionRoute: boolean,
 // }
+// operatorId は受け取らない。確定者は finalize_run() が auth.uid() から
+// 導出する。同意3種のaudit_eventも finalize_run() の内部で、確定処理と
+// 同一トランザクションで記録される（migration 048）。
 // ─────────────────────────────────────────────
 export async function POST(request: Request) {
     try {
-        const { runId, operatorId, consentFlags, exceptionRoute } = await request.json()
+        const { runId, consentFlags, exceptionRoute } = await request.json()
 
-        if (!runId || !operatorId) {
-            return Response.json({ error: 'runId and operatorId are required' }, { status: 400 })
+        if (!runId) {
+            return Response.json({ error: 'runId is required' }, { status: 400 })
         }
 
         const supabase = await createServerSupabaseClient()
@@ -86,35 +88,20 @@ export async function POST(request: Request) {
         // argument) and re-validates all finalize conditions server-side, so it
         // can no longer be bypassed by calling the RPC directly. See migration
         // 030_b1_ms1_finalize_run_stage3_remediation.sql.
+        // 同意3種は finalize_run() の引数として渡し、確定処理と同一
+        // トランザクション内で記録させる。従来は comparison_result のみを
+        // 渡し、残る2種をRPC呼出しの後に別途INSERTしていたため、確定は
+        // 成功したが同意証跡だけ失敗する状態を作りうる構造だった
+        // （migration 048で是正）。
         const { error: rpcErr } = await supabase.rpc('finalize_run', {
             p_run_id: runId,
             p_pdf_object_key: pdfObjectKey,
             p_pdf_sha256: pdfSha256,
             p_consent_comparison_result: consentFlags.comparison_result ?? false,
+            p_consent_important_matters: consentFlags.important_matters ?? false,
+            p_consent_personal_info: consentFlags.personal_info ?? false,
         })
         if (rpcErr) return Response.json({ error: rpcErr.message }, { status: 500 })
-
-        // ── Additional consent events (outside transaction) ──
-        const additionalEvents = []
-        if (consentFlags.important_matters) {
-            additionalEvents.push({
-                run_id: runId,
-                event_type: 'consent_important_matters' as const,
-                operator_id: operatorId,
-                payload: { obtained_at: new Date().toISOString() },
-            })
-        }
-        if (consentFlags.personal_info) {
-            additionalEvents.push({
-                run_id: runId,
-                event_type: 'consent_personal_info' as const,
-                operator_id: operatorId,
-                payload: { obtained_at: new Date().toISOString() },
-            })
-        }
-        if (additionalEvents.length > 0) {
-            await supabase.from('audit_event').insert(additionalEvents)
-        }
 
         return Response.json({ success: true, pdfObjectKey, pdfSha256 })
     } catch (err: unknown) {

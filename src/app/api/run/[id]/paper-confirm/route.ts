@@ -1,42 +1,27 @@
 import { createServerSupabaseClient } from '@/lib/supabase/server'
 
 // POST /api/run/[id]/paper-confirm
-// Body: { operatorId }
+// Body: {}（operatorId は受け取らない）
+// 呼出者は record_paper_confirmation() が auth.uid() から導出する
+// （migration 048）。run更新とaudit_event記録は単一トランザクション。
 export async function POST(
-    request: Request,
+    _request: Request,
     { params }: { params: Promise<{ id: string }> }
 ) {
     try {
         const { id: runId } = await params
-        const { operatorId } = await request.json() as { operatorId: string }
-
-        if (!runId || !operatorId) {
-            return Response.json({ error: 'runId and operatorId required' }, { status: 400 })
+        if (!runId) {
+            return Response.json({ error: 'runId required' }, { status: 400 })
         }
 
         const supabase = await createServerSupabaseClient()
+        const { data: { user } } = await supabase.auth.getUser()
+        if (!user) return Response.json({ error: 'unauthorized' }, { status: 401 })
 
-        const { data: run, error: runErr } = await supabase
-            .from('run').select('id, run_status').eq('id', runId).single()
-        if (runErr || !run) return Response.json({ error: 'run not found' }, { status: 404 })
-        if (run.run_status !== 'draft') {
-            return Response.json({ error: 'run not editable' }, { status: 400 })
-        }
-
-        const now = new Date().toISOString()
-
-        const { error: upErr } = await supabase.from('run').update({
-            paper_confirmation_status: 'completed',
-            paper_confirmation_completed_at: now,
-        }).eq('id', runId)
-        if (upErr) return Response.json({ error: upErr.message }, { status: 500 })
-
-        await supabase.from('audit_event').insert({
-            run_id: runId,
-            event_type: 'paper_confirmation_completed',
-            operator_id: operatorId,
-            payload: { completed_at: now },
+        const { error } = await supabase.rpc('record_paper_confirmation', {
+            p_run_id: runId,
         })
+        if (error) return Response.json({ error: error.message }, { status: 400 })
 
         return Response.json({ success: true })
     } catch (err: unknown) {
