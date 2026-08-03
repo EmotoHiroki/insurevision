@@ -46,3 +46,4 @@ __pycache__/
 
 # agent worktrees (transient, never commit)
 .claude/worktrees/
+supabase/.temp/
