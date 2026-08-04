@@ -6,15 +6,19 @@ import type { Run, Snapshot, MinimalProofPdfStub } from '@/lib/types'
 // Body: {
 //   runId: string,
 //   consentFlags: { comparison_result: boolean, important_matters: boolean, personal_info: boolean },
-//   exceptionRoute: boolean,
 // }
 // operatorId は受け取らない。確定者は finalize_run() が auth.uid() から
 // 導出する。同意3種のaudit_eventも finalize_run() の内部で、確定処理と
 // 同一トランザクションで記録される（migration 048）。
+//
+// 田島様2026-08-04ご指摘5: exceptionRouteはクライアントから受け取らず、
+// finalize_run()内の判定（v_customer_decision <> 'compare'）と同じ式で
+// サーバー側のrun.customer_decisionから導出する。事前チェック（このAPI
+// ルート内）とDB側の最終判定が異なる値を見て食い違う余地をなくす。
 // ─────────────────────────────────────────────
 export async function POST(request: Request) {
     try {
-        const { runId, consentFlags, exceptionRoute } = await request.json()
+        const { runId, consentFlags } = await request.json()
 
         if (!runId) {
             return Response.json({ error: 'runId is required' }, { status: 400 })
@@ -27,6 +31,8 @@ export async function POST(request: Request) {
             .from('run').select('*').eq('id', runId).single()
         if (runErr || !run) return Response.json({ error: 'run not found' }, { status: 404 })
 
+        const exceptionRoute = run.customer_decision !== 'compare'
+
         // G-21: allow 'draft' or 'post_record_pending' (post_record flow finalizes from post_record_pending)
         if (run.run_status !== 'draft' && run.run_status !== 'post_record_pending') {
             return Response.json({ error: 'already finalized' }, { status: 400 })
@@ -35,8 +41,15 @@ export async function POST(request: Request) {
         const { data: snapshot } = await supabase
             .from('snapshot').select('*').eq('run_id', runId).maybeSingle()
 
-        // Fail-Closed: unresolved_items must be empty
-        if (snapshot && snapshot.unresolved_items.length > 0) {
+        // Fail-Closed: snapshot must exist and have no unresolved items.
+        // 田島様2026-08-04ご指摘5: snapshot不存在を合格扱いしていた（if(snapshot && ...)
+        // はsnapshotがnullの場合まるごとスキップされる）。finalize_run()側は
+        // snapshot 0件を明示的に拒否しており、このAPIルートの事前チェックだけが
+        // 緩い状態だった。
+        if (!snapshot) {
+            return Response.json({ error: 'snapshot not found' }, { status: 422 })
+        }
+        if (snapshot.unresolved_items.length > 0) {
             return Response.json(
                 { error: 'unresolved_items', items: snapshot.unresolved_items },
                 { status: 422 }

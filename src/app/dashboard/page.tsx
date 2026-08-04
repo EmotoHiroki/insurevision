@@ -42,7 +42,10 @@ export default function DashboardPage() {
         setLoading(false)
     }, [router])
 
-    useEffect(() => { loadData() }, [loadData])
+    useEffect(() => {
+        const run = async () => { await loadData() }
+        run()
+    }, [loadData])
 
     const handleLogout = async () => {
         const supabase = createClient()

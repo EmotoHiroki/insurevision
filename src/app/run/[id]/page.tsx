@@ -105,11 +105,17 @@ export default function RunDetailPage() {
     // M2 Spec 2: 課題解消メモ
     const [resolutionMemo, setResolutionMemo] = useState('')
     const [savingMemo, setSavingMemo] = useState(false)
-    // M2 Spec 1: coverage_status update
-    const [updatingCoverage, setUpdatingCoverage] = useState<string | null>(null)
+    // M2 Spec 1: coverage_status update.
+    // 田島様2026-08-04ご指摘5: 単一IDのstateだと、候補Aの更新完了時にsetUpdatingCoverage(null)
+    // すると、まだ処理中の候補Bのdisabled表示まで一緒に解除されてしまう。候補ごとに
+    // 独立したSetへ変更。
+    const [updatingCoverage, setUpdatingCoverage] = useState<Set<string>>(new Set())
     // A5 fix: synchronous in-flight guard (React state alone isn't checked until a re-render,
-    // which is too late to stop a fast double-click / double-fire — see handleUpdateCoverageStatus)
-    const updatingCoverageRef = React.useRef<string | null>(null)
+    // which is too late to stop a fast double-click / double-fire — see handleUpdateCoverageStatus).
+    // 田島様2026-08-04ご指摘5: 単一IDの保持だと、候補Aの処理中に候補Bを操作すると
+    // refがBで上書きされ、Aへの重複リクエストのガードが外れてしまう。候補ごとに
+    // 独立して管理できるSetへ変更。
+    const updatingCoverageRef = React.useRef<Set<string>>(new Set())
     // D-B / G-10: delivery record
     const [deliveryMethod, setDeliveryMethod] = useState<string>('')
     const [deliveryConfirmed, setDeliveryConfirmed] = useState(false)
@@ -299,7 +305,7 @@ export default function RunDetailPage() {
     }
 
     // M2 Spec 1: update coverage_status on a candidate
-    // A5 fix: `disabled={updatingCoverage === c.id}` on the button only takes effect after a
+    // A5 fix: `disabled={updatingCoverage.has(c.id)}` on the button only takes effect after a
     // React re-render, so a fast real double-click (or double-fire) can enter this function
     // twice before the first call's setUpdatingCoverage is ever painted. Guard synchronously
     // with a ref (checked/set before any await) so the second call returns immediately instead
@@ -307,12 +313,12 @@ export default function RunDetailPage() {
     // already matches the candidate's current status, matching the existing "re-selecting an
     // already-selected value is a no-op" expectation and avoiding a duplicate audit row.
     const handleUpdateCoverageStatus = async (candidateId: string, status: CoverageStatus) => {
-        if (updatingCoverageRef.current === candidateId) return
+        if (updatingCoverageRef.current.has(candidateId)) return
         const current = candidates.find(c => c.id === candidateId)
         if (current && current.coverage_status === status) return
 
-        updatingCoverageRef.current = candidateId
-        setUpdatingCoverage(candidateId)
+        updatingCoverageRef.current.add(candidateId)
+        setUpdatingCoverage(prev => new Set(prev).add(candidateId))
         try {
             const supabase = createClient()
             const { error: rpcErr } = await supabase.rpc('update_candidate_coverage_status', {
@@ -320,13 +326,21 @@ export default function RunDetailPage() {
                 p_status: status,
             })
             if (!rpcErr) {
-                setCandidates(prev => prev.map(c => c.id === candidateId ? { ...c, coverage_status: status } : c))
+                // 田島様2026-08-04ご指摘5: ローカルのcandidates配列だけをパッチしていたため、
+                // 変更が比較提示済み状態を無効化した場合（run.compare_presented_atがDB側で
+                // NULLへ戻る）でも、画面のrun状態には反映されていなかった。再取得して
+                // run・candidatesの両方を最新化する。
+                await loadData()
             } else {
                 showToast(rpcErr.message, 'error')
             }
         } finally {
-            updatingCoverageRef.current = null
-            setUpdatingCoverage(null)
+            updatingCoverageRef.current.delete(candidateId)
+            setUpdatingCoverage(prev => {
+                const next = new Set(prev)
+                next.delete(candidateId)
+                return next
+            })
         }
     }
 
@@ -637,7 +651,6 @@ export default function RunDetailPage() {
                         important_matters: false,
                         personal_info: false,
                     },
-                    exceptionRoute: false,
                 }),
             })
             const body = await res.json()
@@ -1480,7 +1493,7 @@ export default function RunDetailPage() {
                                                             const isActive = c.coverage_status === opt.value
                                                             return (
                                                                 <button key={opt.value}
-                                                                    disabled={!isEditable || updatingCoverage === c.id}
+                                                                    disabled={!isEditable || updatingCoverage.has(c.id)}
                                                                     onClick={() => handleUpdateCoverageStatus(c.id, opt.value)}
                                                                     style={{
                                                                         flex: 1, padding: '4px 0', fontSize: 11, fontWeight: isActive ? 700 : 400,
