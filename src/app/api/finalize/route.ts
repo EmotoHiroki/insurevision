@@ -95,6 +95,26 @@ export async function POST(request: Request) {
         const pdfSha256 = hashArray.map(b => b.toString(16).padStart(2, '0')).join('')
         const pdfObjectKey = `runs/${runId}/proof.json`
 
+        // ── Upload proof to Storage before finalizing ──
+        // 田島様2026-08-04ご決定: 「Storage上の証跡実体の保存とSHA-256一致確認は、
+        // MS1で対応してください」。これまでpdf_object_key・pdf_sha256をDBに記録
+        // するだけで、Storageへの実ファイル保存自体を行っていなかった
+        // （実体の無い確定証跡を作れる構造だった）。migration 054で
+        // finalize_run()自体がstorage.objectsの実在とSHA-256一致を検証するように
+        // なったため、ここでのアップロードが実質的な確定条件になる。
+        // authenticatedクライアントでアップロードすることで、storage.objectsの
+        // RLS（proofs_insert_own_agency＝runの所属代理店のみ）を経由させる。
+        const { error: uploadErr } = await supabase.storage
+            .from('proofs')
+            .upload(pdfObjectKey, pdfJson, {
+                contentType: 'application/json',
+                upsert: true,
+                metadata: { sha256: pdfSha256 },
+            })
+        if (uploadErr) {
+            return Response.json({ error: `proof upload failed: ${uploadErr.message}` }, { status: 500 })
+        }
+
         // ── Atomic finalize via RPC ──
         // b1-MS1 Stage 3: finalize_run now derives the caller's operator identity
         // from auth.uid() internally (rather than trusting the p_operator_id
