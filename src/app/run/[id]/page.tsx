@@ -214,18 +214,14 @@ export default function RunDetailPage() {
         setSaving(true)
         try {
             const supabase = createClient()
-            const nextSlot = candidates.length > 0 ? Math.max(...candidates.map(c => c.slot_no)) + 1 : 1
-            const { data, error: err } = await supabase.from('candidate').insert({
-                run_id: runId,
-                slot_no: nextSlot,
-                insurer_name: newInsurerName.trim(),
-                product_name: newProductName.trim() || null,
-                annual_premium: newPremium ? parseInt(newPremium) : null,
-                status: 'active',
-            }).select().single()
+            const { error: err } = await supabase.rpc('add_candidate', {
+                p_run_id: runId,
+                p_insurer_name: newInsurerName.trim(),
+                p_product_name: newProductName.trim() || null,
+                p_annual_premium: newPremium ? parseInt(newPremium) : null,
+            })
             if (err) throw err
-            if (!data) throw new Error('候補の追加に失敗しました / Failed to add candidate')
-            setCandidates(prev => [...prev, data as Candidate])
+            await loadData()
             setNewInsurerName('')
             setNewProductName('')
             setNewPremium('')
@@ -291,16 +287,12 @@ export default function RunDetailPage() {
         setSaving(true)
         try {
             const supabase = createClient()
-            const nextSlot = candidates.length > 0 ? Math.max(...candidates.map(c => c.slot_no)) + 1 : 1
-            const { data, error: err } = await supabase.from('candidate').insert({
-                run_id: runId,
-                slot_no: nextSlot,
-                insurer_name: '',
-                role: nextRole,
-                status: 'active',
-            }).select().single()
+            const { error: err } = await supabase.rpc('add_candidate', {
+                p_run_id: runId,
+                p_role: nextRole,
+            })
             if (err) throw err
-            setCandidates(prev => [...prev, data as Candidate])
+            await loadData()
         } catch (e: unknown) {
             showToast(e instanceof Error ? e.message : 'Error', 'error')
         } finally { setSaving(false) }
