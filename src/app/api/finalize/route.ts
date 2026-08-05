@@ -86,30 +86,41 @@ export async function POST(request: Request) {
         // ── Build minimal proof stub ──
         const pdfStub = buildMinimalProofStub(run as Run, snapshot as Snapshot | null, consentFlags)
         const pdfJson = JSON.stringify(pdfStub)
-
-        // SHA-256 using Web Crypto API (available in edge/Node environments)
-        const encoder = new TextEncoder()
-        const data = encoder.encode(pdfJson)
-        const hashBuffer = await crypto.subtle.digest('SHA-256', data)
-        const hashArray = Array.from(new Uint8Array(hashBuffer))
-        const pdfSha256 = hashArray.map(b => b.toString(16).padStart(2, '0')).join('')
         const pdfObjectKey = `runs/${runId}/proof.json`
 
+        // ── 証跡本文をDBへ登録し、SHA-256はDB側に算出させる ──
+        // 田島様2026-08-05ご指摘: migration 054の検証は
+        // storage.objects.user_metadata.sha256（アップロード時に呼出し元が
+        // 任意に付与できる値）と、RPC引数のSHA値を突き合わせるだけであり、
+        // 両方とも同じ呼出し元が渡す値であるため、内容が異なっていても
+        // 検査を通過できた（内容一致を保証していなかった）。
+        // migration 056以降は、本文をsave_run_proof()へ渡してDB側で
+        // SHA-256を算出させ、その戻り値のみを以降で使用する。
+        // アプリ側で算出した値をDBへ申告する経路は廃止した。
+        const { data: serverSha, error: proofErr } = await supabase.rpc('save_run_proof', {
+            p_run_id: runId,
+            p_object_key: pdfObjectKey,
+            p_payload: pdfJson,
+        })
+        if (proofErr || !serverSha) {
+            return Response.json(
+                { error: `proof registration failed: ${proofErr?.message ?? 'no digest returned'}` },
+                { status: 500 },
+            )
+        }
+        const pdfSha256 = serverSha as string
+
         // ── Upload proof to Storage before finalizing ──
-        // 田島様2026-08-04ご決定: 「Storage上の証跡実体の保存とSHA-256一致確認は、
-        // MS1で対応してください」。これまでpdf_object_key・pdf_sha256をDBに記録
-        // するだけで、Storageへの実ファイル保存自体を行っていなかった
-        // （実体の無い確定証跡を作れる構造だった）。migration 054で
-        // finalize_run()自体がstorage.objectsの実在とSHA-256一致を検証するように
-        // なったため、ここでのアップロードが実質的な確定条件になる。
         // authenticatedクライアントでアップロードすることで、storage.objectsの
         // RLS（proofs_insert_own_agency＝runの所属代理店のみ）を経由させる。
+        // finalize_run()は、ここで保存された実体のサイズとeTag（Storageサービスが
+        // 実バイト列から書き込む値。呼出し元は偽装できない）を、DB上の本文と
+        // 突き合わせて内容一致を検証する。
         const { error: uploadErr } = await supabase.storage
             .from('proofs')
             .upload(pdfObjectKey, pdfJson, {
                 contentType: 'application/json',
                 upsert: true,
-                metadata: { sha256: pdfSha256 },
             })
         if (uploadErr) {
             return Response.json({ error: `proof upload failed: ${uploadErr.message}` }, { status: 500 })
