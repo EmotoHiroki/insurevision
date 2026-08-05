@@ -116,6 +116,11 @@ export default function RunDetailPage() {
     // refがBで上書きされ、Aへの重複リクエストのガードが外れてしまう。候補ごとに
     // 独立して管理できるSetへ変更。
     const updatingCoverageRef = React.useRef<Set<string>>(new Set())
+    // 田島様2026-08-05ご指摘: 候補除外ボタンにも同じ同期ガードが必要。
+    // exclude_candidate() 自体は既に除外済みの候補を Fail-Closed で拒否するため
+    // 監査ログが重複することはないが、二度押しで2回目がエラートーストとして
+    // 見えてしまう。付帯状況と同じく候補ごとのSetで同期的に抑止する。
+    const excludingRef = React.useRef<Set<string>>(new Set())
     // D-B / G-10: delivery record
     const [deliveryMethod, setDeliveryMethod] = useState<string>('')
     const [deliveryConfirmed, setDeliveryConfirmed] = useState(false)
@@ -249,6 +254,10 @@ export default function RunDetailPage() {
             showToast(locale === 'ja' ? 'R-999選択時はメモ入力が必須です' : 'Memo is required when R-999 is selected', 'error')
             return
         }
+        // 同期ガード。disabled は React の再描画後にしか効かないため、
+        // 高速な二度押しでは2回目のハンドラが先に走ってしまう（A5と同型）。
+        if (excludingRef.current.has(candidateId)) return
+        excludingRef.current.add(candidateId)
         setSaving(true)
         try {
             const supabase = createClient()
@@ -266,7 +275,10 @@ export default function RunDetailPage() {
             showToast(locale === 'ja' ? '除外しました' : 'Candidate excluded')
         } catch (e: unknown) {
             showToast(e instanceof Error ? e.message : 'Error', 'error')
-        } finally { setSaving(false) }
+        } finally {
+            excludingRef.current.delete(candidateId)
+            setSaving(false)
+        }
     }
 
     const handleStartPresenting = async () => {
