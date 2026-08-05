@@ -4,7 +4,7 @@ import React, { useEffect, useState, useCallback } from 'react'
 import { useRouter, useParams, useSearchParams } from 'next/navigation'
 import { createClient } from '@/lib/supabase/client'
 import { useLocale } from '@/lib/locale-context'
-import type { Run, Candidate, Operator, AuditEvent, Snapshot, CoverageStatus, ExclusionReasonCode } from '@/lib/types'
+import type { Run, Candidate, Operator, AuditEvent, Snapshot, CoverageStatus, ExclusionReasonCode, MeetingScene, RecordingMode } from '@/lib/types'
 import { t as i18nT } from '@/lib/i18n'
 import { format } from 'date-fns'
 import {
@@ -133,6 +133,11 @@ export default function RunDetailPage() {
     // G-21: post-record phase completion state
     const [completingPhase1, setCompletingPhase1] = useState(false)
     const [completingPhase2, setCompletingPhase2] = useState(false)
+    // 田島様2026-08-04ご指摘2: meeting_scene・recording_modeがmigration 050で確定時
+    // 必須になったが、作成後にこれらを設定するUIがなかった（新規作成ウィザードで
+    // 「未選択の場合はPhase1フローで処理されます」を選んだrunが、二度と確定できなく
+    // なる）。run詳細画面から後追いで設定できるようにする。
+    const [savingSceneMode, setSavingSceneMode] = useState(false)
     // Phase2-a state
     const [savingConsent, setSavingConsent] = useState(false)
     const [savingSmartphone, setSavingSmartphone] = useState(false)
@@ -468,6 +473,23 @@ export default function RunDetailPage() {
     }
 
     // ─────────────────────────────────────────────
+    // 田島様2026-08-04ご指摘2: 作成時に未選択のまま残ったmeeting_scene・
+    // recording_modeを、確定前に後追いで設定する
+    // ─────────────────────────────────────────────
+    const handleSetSceneMode = async (field: 'meeting_scene' | 'recording_mode', value: MeetingScene | RecordingMode) => {
+        if (!run) return
+        setSavingSceneMode(true)
+        try {
+            const supabase = createClient()
+            const { error: upErr } = await supabase.from('run').update({ [field]: value }).eq('id', runId)
+            if (upErr) throw upErr
+            await loadData()
+        } catch (e: unknown) {
+            showToast(e instanceof Error ? e.message : 'Error', 'error')
+        } finally { setSavingSceneMode(false) }
+    }
+
+    // ─────────────────────────────────────────────
     // G-21: 事後記録フェーズ2完了
     // ─────────────────────────────────────────────
     const handleCompletePhase2 = async () => {
@@ -670,7 +692,24 @@ export default function RunDetailPage() {
             id: 'snapshot_resolved',
             labelJa: '全フラグ解決済み（Fail-Closed）',
             labelEn: 'All flags resolved (Fail-Closed)',
-            pass: !snapshot || snapshot.unresolved_items.length === 0,
+            // 田島様2026-08-04ご指摘5: snapshot不存在を合格扱いしていた
+            // （snapshotがnullなら!snapshotがtrueになるため）。finalize_run()・
+            // /api/financeのAPI側と同じく、snapshotの実在を要求する。
+            pass: !!snapshot && snapshot.unresolved_items.length === 0,
+        },
+        // 田島様2026-08-04ご指摘2: meeting_scene・recording_modeをfinalize_run()側で
+        // 確定時必須化した（migration 050）。画面のチェックリストにも同じ条件を反映する。
+        {
+            id: 'meeting_scene_set',
+            labelJa: '面談シーンが選択されている',
+            labelEn: 'Meeting scene is selected',
+            pass: !!run.meeting_scene,
+        },
+        {
+            id: 'recording_mode_set',
+            labelJa: '記録方式が選択されている',
+            labelEn: 'Recording mode is selected',
+            pass: !!run.recording_mode,
         },
         {
             id: 'customer_decision',
@@ -1320,8 +1359,20 @@ export default function RunDetailPage() {
                             </div>
                         )}
 
-                        {/* Add candidate form (multi_insurer only, before compare_presented_at) */}
-                        {isEditable && !run.compare_presented_at && run.comparison_scope !== 'same_insurer' && (
+                        {/* 田島様2026-08-04ご指摘4: 8月1日の方針は「比較提示後の変更を禁止するの
+                            ではなく、変更を許容したうえで提示済み状態を無効化し再提示を必須とする」。
+                            画面が提示後にこのフォーム自体を非表示にしていたのは方針と逆だった。
+                            提示後も操作でき、変更すると提示が無効化される旨を明示する。 */}
+                        {isEditable && run.compare_presented_at && run.comparison_scope !== 'same_insurer' && (
+                            <div className="section-card" style={{ background: '#fffbeb', borderColor: '#fbbf24' }}>
+                                <p style={{ color: '#92400e', fontSize: 13 }}>
+                                    {locale === 'ja'
+                                        ? '比較は提示済みです。候補の追加・除外を行うと提示済み状態が無効化され、再提示が必要になります。'
+                                        : 'Comparison has already been presented. Adding or excluding a candidate will invalidate the presentation and require re-presenting.'}
+                                </p>
+                            </div>
+                        )}
+                        {isEditable && run.comparison_scope !== 'same_insurer' && (
                             <div className="section-card">
                                 <h3 style={{ fontSize: 15, fontWeight: 600, marginBottom: 12 }}>
                                     <LuPlus size={14} style={{ display: 'inline', marginRight: 6 }} />
@@ -1372,11 +1423,22 @@ export default function RunDetailPage() {
                             )
                             return (
                                 <>
+                                    {isEditable && run.compare_presented_at && (
+                                        <div className="section-card" style={{ background: '#fffbeb', borderColor: '#fbbf24' }}>
+                                            <p style={{ color: '#92400e', fontSize: 13 }}>
+                                                {locale === 'ja'
+                                                    ? '比較は提示済みです。候補の追加・除外を行うと提示済み状態が無効化され、再提示が必要になります。'
+                                                    : 'Comparison has already been presented. Adding or excluding a candidate will invalidate the presentation and require re-presenting.'}
+                                            </p>
+                                        </div>
+                                    )}
                                     <div className="m3-candidate-grid" style={{ display: 'grid', gridTemplateColumns: `repeat(${orderedCandidates.length}, 1fr)`, gap: 16 }}>
                                         {orderedCandidates.map(c => {
                                             const meta = ROLE_META[c.role ?? ''] ?? { ja: c.role ?? '', en: c.role ?? '', color: 'var(--primary)' }
                                             const isReadonly = c.role === 'prior'
-                                            const canExclude = isEditable && !isReadonly && c.status === 'active' && !run.compare_presented_at
+                                            // 田島様2026-08-04ご指摘4: 提示後も除外操作を可能にする（8月1日の方針どおり、
+                                            // 提示済み状態はexclude_candidate()側で無効化される。禁止ではなく無効化）
+                                            const canExclude = isEditable && !isReadonly && c.status === 'active'
                                             return (
                                                 <div key={c.id} className="section-card" style={{ borderTop: `3px solid ${meta.color}`, opacity: c.status === 'excluded' ? 0.5 : 1 }}>
                                                     <div style={{ fontSize: 11, fontWeight: 700, color: meta.color, marginBottom: 8, textTransform: 'uppercase', letterSpacing: '0.05em' }}>
@@ -1417,7 +1479,8 @@ export default function RunDetailPage() {
                                                                         style={{ fontSize: 12 }} />
                                                                     <div style={{ display: 'flex', gap: 6 }}>
                                                                         <button className="btn-danger" onClick={() => handleExcludeCandidate(c.id)}
-                                                                            disabled={saving} style={{ fontSize: 12, padding: '5px 10px' }}>
+                                                                            disabled={saving || !exclusionReasonCode || (exclusionReasonCode === 'R-999' && !exclusionReason.trim())}
+                                                                            style={{ fontSize: 12, padding: '5px 10px' }}>
                                                                             <LuCheck size={12} style={{ marginRight: 4 }} />{locale === 'ja' ? '確定' : 'Confirm'}
                                                                         </button>
                                                                         <button className="btn-secondary" onClick={() => { setExcludingId(null); setExclusionReason(''); setExclusionReasonCode('') }} style={{ fontSize: 12, padding: '5px 10px' }}>
@@ -1439,8 +1502,10 @@ export default function RunDetailPage() {
                                             )
                                         })}
                                     </div>
-                                    {/* Add recommended button */}
-                                    {isEditable && !run.compare_presented_at && recCount < 3 && (
+                                    {/* Add recommended button.
+                                        田島様2026-08-04ご指摘4: 提示後も追加操作を可能にする（add_candidate()側で
+                                        提示済み状態が無効化される。禁止ではなく無効化という8月1日の方針） */}
+                                    {isEditable && recCount < 3 && (
                                         <button className="btn-secondary" onClick={handleAddRecommended} disabled={saving}
                                             style={{ display: 'flex', alignItems: 'center', gap: 6, fontSize: 13 }}>
                                             <LuPlus size={14} />
@@ -1559,24 +1624,44 @@ export default function RunDetailPage() {
                                                         {c.excluded_reason}
                                                     </div>
                                                 )}
-                                                {isEditable && c.status === 'active' && !run.compare_presented_at && (
+                                                {/* 田島様2026-08-04ご指摘4: 提示後も除外操作を可能にする（exclude_candidate()側で
+                                                    提示済み状態が無効化される。禁止ではなく無効化という8月1日の方針） */}
+                                                {isEditable && c.status === 'active' && (
                                                     <div style={{ marginTop: 12 }}>
                                                         {excludingId === c.id ? (
                                                             <div style={{ display: 'flex', gap: 6, flexDirection: 'column' }}>
+                                                                {/* 田島様2026-08-04ご指摘4: この複数保険会社レイアウトには理由コードの
+                                                                    選択欄がなく、現行RPC（exclude_candidate、理由コード必須）が常に
+                                                                    エラーになっていた。同一保険会社レイアウトと同じ選択欄を追加する。 */}
+                                                                <select className="form-select" value={exclusionReasonCode}
+                                                                    onChange={e => setExclusionReasonCode(e.target.value as ExclusionReasonCode | '')}
+                                                                    style={{ fontSize: 12, padding: '5px 8px' }}>
+                                                                    <option value="">{locale === 'ja' ? '除外理由コードを選択' : 'Select reason code'}</option>
+                                                                    <option value="R-001">R-001: {locale === 'ja' ? '保険料が予算を超過' : 'Premium exceeds budget'}</option>
+                                                                    <option value="R-002">R-002: {locale === 'ja' ? '補償内容が要件を満たさない' : 'Coverage insufficient'}</option>
+                                                                    <option value="R-003">R-003: {locale === 'ja' ? '代理店の取扱い対象外' : 'Not handled by agency'}</option>
+                                                                    <option value="R-004">R-004: {locale === 'ja' ? '顧客の希望により除外' : 'Excluded per customer request'}</option>
+                                                                    <option value="R-005">R-005: {locale === 'ja' ? '保険会社の引受条件により除外' : 'Insurer underwriting conditions'}</option>
+                                                                    <option value="R-999">R-999: {locale === 'ja' ? 'その他（メモ必須）' : 'Other (memo required)'}</option>
+                                                                </select>
                                                                 <input className="form-input" value={exclusionReason} onChange={e => setExclusionReason(e.target.value)}
-                                                                    placeholder={locale === 'ja' ? '除外理由' : 'Exclusion reason'} />
+                                                                    placeholder={exclusionReasonCode === 'R-999'
+                                                                        ? (locale === 'ja' ? '補足メモ（必須）' : 'Memo (required)')
+                                                                        : (locale === 'ja' ? '補足メモ（任意）' : 'Memo (optional)')} />
                                                                 <div style={{ display: 'flex', gap: 6 }}>
-                                                                    <button className="btn-danger" onClick={() => handleExcludeCandidate(c.id)} disabled={!exclusionReason.trim() || saving} style={{ fontSize: 12, padding: '5px 10px' }}>
+                                                                    <button className="btn-danger" onClick={() => handleExcludeCandidate(c.id)}
+                                                                        disabled={saving || !exclusionReasonCode || (exclusionReasonCode === 'R-999' && !exclusionReason.trim())}
+                                                                        style={{ fontSize: 12, padding: '5px 10px' }}>
                                                                         <LuCheck size={12} style={{ marginRight: 4 }} />
                                                                         {locale === 'ja' ? '確定' : 'Confirm'}
                                                                     </button>
-                                                                    <button className="btn-secondary" onClick={() => { setExcludingId(null); setExclusionReason('') }} style={{ fontSize: 12, padding: '5px 10px' }}>
+                                                                    <button className="btn-secondary" onClick={() => { setExcludingId(null); setExclusionReason(''); setExclusionReasonCode('') }} style={{ fontSize: 12, padding: '5px 10px' }}>
                                                                         {locale === 'ja' ? 'キャンセル' : 'Cancel'}
                                                                     </button>
                                                                 </div>
                                                             </div>
                                                         ) : (
-                                                            <button onClick={() => { setExcludingId(c.id); setExclusionReason('') }} style={{
+                                                            <button onClick={() => { setExcludingId(c.id); setExclusionReason(''); setExclusionReasonCode('') }} style={{
                                                                 fontSize: 12, padding: '5px 10px', border: '1px solid var(--error)', color: 'var(--error)',
                                                                 background: 'transparent', borderRadius: 6, cursor: 'pointer', display: 'flex', alignItems: 'center', gap: 4,
                                                             }}>
@@ -1722,6 +1807,49 @@ export default function RunDetailPage() {
                                         ))}
                                     </ul>
                                 </div>
+
+                                {/* 田島様2026-08-04ご指摘2: meeting_scene・recording_modeの後追い設定 */}
+                                {isEditable && (!run.meeting_scene || !run.recording_mode) && (
+                                    <div className="section-card" style={{ borderColor: '#fbbf24', background: '#fffbeb' }}>
+                                        <h3 style={{ fontSize: 15, fontWeight: 700, marginBottom: 8, color: '#92400e' }}>
+                                            {locale === 'ja' ? '確定に必要な項目が未設定です' : 'Required fields for finalization are not set'}
+                                        </h3>
+                                        <p style={{ fontSize: 13, color: '#92400e', marginBottom: 12 }}>
+                                            {locale === 'ja'
+                                                ? '面談シーン・記録方式のいずれかが未選択のrunは確定できません。作成ウィザードで未選択のまま進んだ場合、ここで設定してください。'
+                                                : 'Runs without both meeting scene and recording mode set cannot be finalized. If these were skipped in the creation wizard, set them here.'}
+                                        </p>
+                                        <div style={{ display: 'grid', gap: 12 }}>
+                                            {!run.meeting_scene && (
+                                                <div>
+                                                    <label className="form-label">{locale === 'ja' ? '面談シーン' : 'Meeting Scene'}</label>
+                                                    <select className="form-select" disabled={savingSceneMode}
+                                                        value=""
+                                                        onChange={e => e.target.value && handleSetSceneMode('meeting_scene', e.target.value as MeetingScene)}>
+                                                        <option value="">{locale === 'ja' ? '選択してください' : 'Select'}</option>
+                                                        <option value="visit_smartphone">{locale === 'ja' ? '訪問・スマホ連携' : 'Visit + Smartphone'}</option>
+                                                        <option value="visit_paper">{locale === 'ja' ? '訪問・ペーパー確認' : 'Visit + Paper'}</option>
+                                                        <option value="pc_tablet">{locale === 'ja' ? 'PC・タブレット型' : 'PC/Tablet'}</option>
+                                                        <option value="telephone">{locale === 'ja' ? '電話募集型' : 'Telephone'}</option>
+                                                        <option value="web_meeting">{locale === 'ja' ? 'WEB面談' : 'Web Meeting'}</option>
+                                                    </select>
+                                                </div>
+                                            )}
+                                            {!run.recording_mode && (
+                                                <div>
+                                                    <label className="form-label">{locale === 'ja' ? '記録方式' : 'Recording Mode'}</label>
+                                                    <select className="form-select" disabled={savingSceneMode}
+                                                        value=""
+                                                        onChange={e => e.target.value && handleSetSceneMode('recording_mode', e.target.value as RecordingMode)}>
+                                                        <option value="">{locale === 'ja' ? '選択してください' : 'Select'}</option>
+                                                        <option value="realtime">{locale === 'ja' ? 'リアルタイム記録' : 'Realtime'}</option>
+                                                        <option value="post_record">{locale === 'ja' ? '事後記録' : 'Post-record'}</option>
+                                                    </select>
+                                                </div>
+                                            )}
+                                        </div>
+                                    </div>
+                                )}
 
                                 {/* M2 Spec 2: 課題解消メモ */}
                                 <div className="section-card space-y-2">
