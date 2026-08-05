@@ -1,5 +1,4 @@
 import { createServerSupabaseClient } from '@/lib/supabase/server'
-import type { Run, Snapshot, MinimalProofPdfStub } from '@/lib/types'
 
 // ─────────────────────────────────────────────
 // POST /api/finalize
@@ -83,37 +82,37 @@ export async function POST(request: Request) {
             return Response.json({ error: '重要事項説明書の交付確認が完了していません' }, { status: 422 })
         }
 
-        // ── Build minimal proof stub ──
-        const pdfStub = buildMinimalProofStub(run as Run, snapshot as Snapshot | null, consentFlags)
-        const pdfJson = JSON.stringify(pdfStub)
-        const pdfObjectKey = `runs/${runId}/proof.json`
-
-        // ── 証跡本文をDBへ登録し、SHA-256はDB側に算出させる ──
-        // 田島様2026-08-05ご指摘: migration 054の検証は
-        // storage.objects.user_metadata.sha256（アップロード時に呼出し元が
-        // 任意に付与できる値）と、RPC引数のSHA値を突き合わせるだけであり、
-        // 両方とも同じ呼出し元が渡す値であるため、内容が異なっていても
-        // 検査を通過できた（内容一致を保証していなかった）。
-        // migration 056以降は、本文をsave_run_proof()へ渡してDB側で
-        // SHA-256を算出させ、その戻り値のみを以降で使用する。
-        // アプリ側で算出した値をDBへ申告する経路は廃止した。
-        const { data: serverSha, error: proofErr } = await supabase.rpc('save_run_proof', {
+        // ── 証跡本文をDB側で組み立てさせる ──
+        // 田島様2026-08-06ご指摘: migration 056までは、アプリが組み立てた本文を
+        // save_run_proof()へ渡していた。この関数は空でなければ任意のテキストを
+        // 受け付けていたため、利用者が自分のrunに対して事実と異なる内容の証跡を
+        // 登録・アップロードして確定することが可能であった（保存物の同一性は
+        // 保証していたが、内容がrunの実態を反映していることは保証していなかった）。
+        // migration 057以降、本文はDBがrun・snapshotから組み立てる。アプリは
+        // 本文にもオブジェクトキーにも関与せず、戻り値をそのまま使用する。
+        const { data: proofRows, error: proofErr } = await supabase.rpc('save_run_proof', {
             p_run_id: runId,
-            p_object_key: pdfObjectKey,
-            p_payload: pdfJson,
+            p_consent_comparison_result: consentFlags.comparison_result ?? false,
+            p_consent_important_matters: consentFlags.important_matters ?? false,
+            p_consent_personal_info: consentFlags.personal_info ?? false,
         })
-        if (proofErr || !serverSha) {
+        const proof = Array.isArray(proofRows) ? proofRows[0] : proofRows
+        if (proofErr || !proof?.object_key || !proof?.payload || !proof?.sha256) {
             return Response.json(
-                { error: `proof registration failed: ${proofErr?.message ?? 'no digest returned'}` },
+                { error: `proof registration failed: ${proofErr?.message ?? 'no proof returned'}` },
                 { status: 500 },
             )
         }
-        const pdfSha256 = serverSha as string
+        const pdfObjectKey = proof.object_key as string
+        const pdfJson = proof.payload as string
+        const pdfSha256 = proof.sha256 as string
 
         // ── Upload proof to Storage before finalizing ──
         // authenticatedクライアントでアップロードすることで、storage.objectsの
-        // RLS（proofs_insert_own_agency＝runの所属代理店のみ）を経由させる。
-        // finalize_run()は、ここで保存された実体のサイズとeTag（Storageサービスが
+        // RLSを経由させる。migration 057で当該ポリシーにrun_statusの許可リストを
+        // 追加したため、確定後・アーカイブ後・保留中は上書き自体が拒否される
+        // （確定済み証跡の差し替えによる無効化を防ぐ）。
+        // finalize_run()は、保存された実体のサイズとeTag（Storageサービスが
         // 実バイト列から書き込む値。呼出し元は偽装できない）を、DB上の本文と
         // 突き合わせて内容一致を検証する。
         const { error: uploadErr } = await supabase.storage
@@ -157,43 +156,5 @@ export async function POST(request: Request) {
     }
 }
 
-// ─────────────────────────────────────────────
-// buildMinimalProofStub — pure function, no DB calls
-// ─────────────────────────────────────────────
-function buildMinimalProofStub(
-    run: Run,
-    snapshot: Snapshot | null,
-    consentFlags: { comparison_result: boolean; important_matters: boolean; personal_info: boolean }
-): MinimalProofPdfStub {
-    const stub: MinimalProofPdfStub = {
-        run_id: run.id,
-        customer_ref: run.customer_ref,
-        operator_name: run.operator_id,   // Phase 2: resolve to actual name
-        generated_at: new Date().toISOString(),
-        customer_decision: run.customer_decision!,
-        decision_reason: run.customer_intent_memo ?? '',
-        insurer_list_presented: true,   // always true: auto-recorded at Step2→3 for all paths
-    }
-
-    // comparison_waived path: include consent flags
-    if (run.customer_decision === 'comparison_waived') {
-        stub.consent_important_matters = consentFlags.important_matters
-        stub.consent_personal_info = consentFlags.personal_info
-    }
-
-    // compare path: include comparison_result consent
-    if (run.customer_decision === 'compare') {
-        stub.consent_comparison_result = consentFlags.comparison_result
-    }
-
-    // Snapshot data for traceability
-    if (snapshot) {
-        Object.assign(stub, {
-            confirmed_items: snapshot.confirmed_items,
-            supplemented_items: snapshot.supplemented_items,
-            core_logic_version: snapshot.core_logic_version,
-        })
-    }
-
-    return stub
-}
+// 証跡本文の組み立ては migration 057 で DB 側（save_run_proof）へ移した。
+// アプリが本文を組み立てて渡す実装は、任意の内容を登録できてしまうため廃止した。
