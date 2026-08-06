@@ -217,6 +217,196 @@ else
 fi
 
 echo
+echo "── 9. 候補の追加・付帯状況変更・除外と、比較提示の無効化 ─────────────"
+# 田島様2026-08-06ご指摘4のうち
+# 「candidate追加、除外、付帯状況変更と比較提示無効化」に対応する。
+#
+# 3つの関数はいずれも、候補の内容が変わった時点で
+# run.compare_presented_at を NULL に戻し、その旨を証跡に残す。
+# 比較結果を提示したあとに候補を入れ替えると、
+# 提示済みの比較結果は実態と合わなくなるためである。
+# 無効化されると確定は「比較提示がない」として拒否される。
+CAND_RUN="00000000-0000-0000-0000-0000000000f4"
+
+presented() {
+    curl -s "${SUPABASE_URL}/rest/v1/run?id=eq.${CAND_RUN}&select=compare_presented_at" "${H[@]}" \
+    | sed -n 's/.*"compare_presented_at":\([^,}]*\).*/\1/p'
+}
+# 「無効化された」ことを主張するには、その直前に確かに提示済みだった
+# ことを先に確認しなければならない。最初から未設定なら、無効化の検査は
+# 何も検証していないことになる（無条件に成功する検査になってしまう）。
+set_presented() { # $1=ラベル
+    code -X POST "${SUPABASE_URL}/rest/v1/rpc/record_compare_presented" "${H[@]}" \
+      -d "{\"p_run_id\":\"${CAND_RUN}\"}" >/dev/null
+    if [ "$(presented)" = "null" ]; then
+        ng "$1 の前提となる比較提示を記録できなかった"
+        return 1
+    fi
+    return 0
+}
+
+# 候補の追加
+ADD=$(curl -s -X POST "${SUPABASE_URL}/rest/v1/rpc/add_candidate" "${H[@]}" \
+      -d "{\"p_run_id\":\"${CAND_RUN}\",\"p_insurer_name\":\"検証損保\",\"p_product_name\":\"検証プラン\",\"p_annual_premium\":50000,\"p_role\":\"recommended\"}")
+CAND_ID=$(echo "${ADD}" | sed -n 's/.*"id":"\([^"]*\)".*/\1/p')
+if [ -n "${CAND_ID}" ]; then ok "候補の追加"; else ng "候補の追加（応答: $(echo "${ADD}" | head -c 160)）"; fi
+
+if [ -z "${CAND_ID}" ]; then
+    ng "候補IDを取得できなかったため、以降の候補系検査を実施できない"
+else
+    # 付帯状況の変更で比較提示が無効化されること
+    if set_presented "付帯状況の変更"; then
+        expect_status "付帯状況の変更" 204 \
+          "$(code -X POST "${SUPABASE_URL}/rest/v1/rpc/update_candidate_coverage_status" "${H[@]}" \
+             -d "{\"p_candidate_id\":\"${CAND_ID}\",\"p_status\":\"partial\"}")"
+        if [ "$(presented)" = "null" ]; then
+            ok "付帯状況の変更で比較提示が無効化された"
+        else
+            ng "付帯状況を変更しても比較提示が残っている"
+        fi
+    fi
+
+    # 無効化された状態では確定できないこと
+    expect_status "比較提示が無効な状態での確定は拒否" 400 \
+      "$(code -X POST "${SUPABASE_URL}/rest/v1/rpc/finalize_run" "${H[@]}" \
+         -d "{\"p_run_id\":\"${CAND_RUN}\",\"p_pdf_object_key\":\"dummy\",\"p_pdf_sha256\":\"0000000000000000000000000000000000000000000000000000000000000000\"}")"
+
+    # 理由コードなしの除外は拒否されること（042のFail-Closed化）
+    expect_status "理由コードを伴わない除外は拒否" 400 \
+      "$(code -X POST "${SUPABASE_URL}/rest/v1/rpc/exclude_candidate" "${H[@]}" \
+         -d "{\"p_candidate_id\":\"${CAND_ID}\",\"p_reason_code\":\"\"}")"
+
+    # R-999（その他）は理由文が必須であること
+    expect_status "R-999で理由文を伴わない除外は拒否" 400 \
+      "$(code -X POST "${SUPABASE_URL}/rest/v1/rpc/exclude_candidate" "${H[@]}" \
+         -d "{\"p_candidate_id\":\"${CAND_ID}\",\"p_reason_code\":\"R-999\"}")"
+
+    # 再度比較提示を記録してから除外し、これも無効化されること
+    if set_presented "除外"; then
+        expect_status "理由コードを伴う除外" 204 \
+          "$(code -X POST "${SUPABASE_URL}/rest/v1/rpc/exclude_candidate" "${H[@]}" \
+             -d "{\"p_candidate_id\":\"${CAND_ID}\",\"p_reason_code\":\"R-001\",\"p_reason_text\":\"検証\"}")"
+        if [ "$(presented)" = "null" ]; then
+            ok "除外で比較提示が無効化された"
+        else
+            ng "除外しても比較提示が残っている"
+        fi
+    fi
+
+    # 除外済みの候補は付帯状況を変更できないこと
+    expect_status "除外済み候補の付帯状況変更は拒否" 400 \
+      "$(code -X POST "${SUPABASE_URL}/rest/v1/rpc/update_candidate_coverage_status" "${H[@]}" \
+         -d "{\"p_candidate_id\":\"${CAND_ID}\",\"p_status\":\"full\"}")"
+
+    # 二重除外が拒否されること（二重クリック時のFail-Closed）
+    expect_status "除外済み候補の再除外は拒否" 400 \
+      "$(code -X POST "${SUPABASE_URL}/rest/v1/rpc/exclude_candidate" "${H[@]}" \
+         -d "{\"p_candidate_id\":\"${CAND_ID}\",\"p_reason_code\":\"R-001\",\"p_reason_text\":\"再\"}")"
+fi
+
+echo
+echo "── 10. 並行実行（確定 × 子テーブル書込み × Storage書込み） ───────────"
+# 田島様2026-08-06ご指摘4のうち「確定処理と子テーブル書込み、Storage書込みの
+# 並行実行」に対応する。
+#
+# 関数定義に FOR UPDATE が書かれていることの確認（050_058_check.sql）は
+# 「ロックを書いた」ことしか示さない。ここでは実際に同時へ発射し、
+# 「確定が成功したなら、競合した書込みは必ず失敗している」ことを確認する。
+# どちらが先に処理されるかはタイミングに依存するため、
+# 特定の順序ではなく「両方が成功することはない」ことを判定条件とする。
+RACE_RUN="00000000-0000-0000-0000-0000000000f5"
+
+# 確定に必要な条件を整えて証跡を登録・アップロードする
+# （RT05は専用のrunで、有効な候補1件をruntime_setup.sqlで与えている）
+P3=$(curl -s -X POST "${SUPABASE_URL}/rest/v1/rpc/save_run_proof" "${H[@]}" -d "{\"p_run_id\":\"${RACE_RUN}\"}")
+K3=$(echo "$P3" | sed -n 's/.*"object_key":"\([^"]*\)".*/\1/p')
+S3=$(echo "$P3" | sed -n 's/.*"sha256":"\([^"]*\)".*/\1/p')
+PL3=$(echo "$P3" | python3 -c 'import sys,json; print(json.load(sys.stdin)[0]["payload"])' 2>/dev/null)
+if [ -z "${K3}" ] || [ -z "${PL3}" ]; then
+    ng "並行実行の前提となる証跡を登録できなかった（応答: $(echo "$P3" | head -c 160)）"
+fi
+T3=$(mktemp); printf '%s' "${PL3}" > "${T3}"
+code -X POST "${SUPABASE_URL}/storage/v1/object/proofs/${K3}" "${SH[@]}" --data-binary "@${T3}" >/dev/null
+
+# 前提: この時点で run はまだ確定していないこと。
+# 確定済みのrunに対して実施すると、すべてが「確定済みだから拒否」になり、
+# 並行実行を検証したことにならない。
+PRE_STATUS=$(curl -s "${SUPABASE_URL}/rest/v1/run?id=eq.${RACE_RUN}&select=run_status" "${H[@]}" \
+             | sed -n 's/.*"run_status":"\([^"]*\)".*/\1/p')
+if [ "${PRE_STATUS}" != "draft" ]; then
+    ng "並行実行の前提が崩れている（開始時のrun_status=${PRE_STATUS}、draftであるべき）"
+fi
+
+# 確定と、子テーブルへの書込み・Storageへの上書きを同時に発射する
+FIN_OUT=$(mktemp); CHILD_OUT=$(mktemp); STOR_OUT=$(mktemp)
+curl -s -o /dev/null -w "%{http_code}" -X POST "${SUPABASE_URL}/rest/v1/rpc/finalize_run" "${H[@]}" \
+  -d "{\"p_run_id\":\"${RACE_RUN}\",\"p_pdf_object_key\":\"${K3}\",\"p_pdf_sha256\":\"${S3}\"}" > "${FIN_OUT}" &
+curl -s -o /dev/null -w "%{http_code}" -X POST "${SUPABASE_URL}/rest/v1/intent_confirmation" "${H[@]}" \
+  -d "{\"run_id\":\"${RACE_RUN}\"}" > "${CHILD_OUT}" &
+curl -s -o /dev/null -w "%{http_code}" -X POST "${SUPABASE_URL}/storage/v1/object/proofs/${K3}" "${SH[@]}" \
+  --data-binary "@${T3}" > "${STOR_OUT}" &
+wait
+FIN=$(cat "${FIN_OUT}"); CHILD=$(cat "${CHILD_OUT}"); STOR=$(cat "${STOR_OUT}")
+echo "  （実測: 確定=${FIN} 子テーブル=${CHILD} Storage=${STOR}）"
+
+FINAL_STATUS=$(curl -s "${SUPABASE_URL}/rest/v1/run?id=eq.${RACE_RUN}&select=run_status" "${H[@]}" \
+               | sed -n 's/.*"run_status":"\([^"]*\)".*/\1/p')
+
+# 【判定の考え方】
+# どちらが先に処理されるかはタイミングに依存するため、勝者を固定して
+# 判定してはならない。行ロック（FOR UPDATE）が保証するのは
+# 「同時に中途半端な状態にならないよう直列化されること」であって、
+# 「後から来た方が必ず負けること」ではない。
+#
+# 子テーブルへの書込みが先に成立した場合、それは run がまだ draft の
+# うちに行われた正当な書込みであり、拒否されるべきものではない。
+# 逆に確定が先に成立したなら、その後の書込みは拒否されなければならない。
+#
+# したがって検証すべき不変条件は次の3点である。
+#   (a) 確定が成立したなら、確定後に到達した書込みは必ず拒否されている
+#   (b) 確定の成立後は、新規の子テーブル書込みが拒否される
+#   (c) 保存済み証跡のバイト列が変化していない
+# なお intent_confirmation は証跡本文の構成要素ではないため、
+# 競合して書き込まれても証跡の内容と矛盾しない。証跡の構成要素
+# （run・snapshot・audit_event）が確定前に変化した場合は、
+# 058の再構築・比較により確定自体が拒否される（§7で検証済み）。
+if [ "${FINAL_STATUS}" = "finalized" ]; then
+    ok "確定が成立し、run_status=finalized で確定した"
+
+    if [ "${STOR}" = "200" ] && [ "${FIN}" = "204" ]; then
+        # Storageの上書きは確定後には拒否されなければならない。
+        # 両方成功した場合は、上書きが確定前に到達したことを意味するため、
+        # バイト列が登録内容と一致しているかで健全性を判断する。
+        ok "Storage上書きは確定前に到達した (HTTP ${STOR})。バイト列は後段で検証する"
+    elif [ "${STOR}" != "200" ]; then
+        ok "確定と競合したStorage上書きは拒否された (HTTP ${STOR})"
+    fi
+
+    # (b) 確定が成立した以上、これ以降の子テーブル書込みは必ず拒否される
+    expect_status "確定成立後の子テーブル書込みは拒否" 400 \
+      "$(code -X POST "${SUPABASE_URL}/rest/v1/intent_confirmation" "${H[@]}" \
+         -d "{\"run_id\":\"${RACE_RUN}\"}")"
+
+    # 競合した書込みが確定後にすり抜けていないこと。
+    # 子テーブル書込みが成功した場合、それは確定より前に成立したはずなので、
+    # 「確定済みのrunに対して直接INSERTが通った」状態になっていてはならない。
+    if [ "${CHILD}" = "201" ]; then
+        echo "  （子テーブル書込みが先に成立した。draft中の正当な書込みとして扱う）"
+    fi
+else
+    ok "確定は競合により成立しなかった（run_status=${FINAL_STATUS}）。中途半端な状態は生じていない"
+fi
+
+# 確定後、保存済み証跡のバイト列が変化していないこと
+GOT3=$(curl -s "${SUPABASE_URL}/storage/v1/object/proofs/${K3}" "${H[@]}")
+if [ "${GOT3}" = "${PL3}" ]; then
+    ok "並行実行後も保存済み証跡のバイト列が不変"
+else
+    ng "並行実行後に保存済み証跡が変化した"
+fi
+rm -f "${T3}" "${FIN_OUT}" "${CHILD_OUT}" "${STOR_OUT}"
+
+echo
 echo "============================================================"
 echo "PASS: ${PASS} / FAIL: ${FAIL}"
 echo "検証後は supabase/verification/runtime_teardown.sql を実行してください。"

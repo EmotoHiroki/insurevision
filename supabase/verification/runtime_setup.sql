@@ -24,10 +24,15 @@
 DO $$
 DECLARE v_real int;
 BEGIN
+    -- 検証用の使い捨てrunのID一覧。ここに載っていないrunが1件でも存在する
+    -- 環境は、実業務データがある可能性があるため中断する。
+    -- 新しい検証用runを追加したときは、必ず本一覧にも追加すること。
     SELECT count(*) INTO v_real FROM public.run
      WHERE id NOT IN ('00000000-0000-0000-0000-0000000000f1'::uuid,
                       '00000000-0000-0000-0000-0000000000f2'::uuid,
-                      '00000000-0000-0000-0000-0000000000f3'::uuid);
+                      '00000000-0000-0000-0000-0000000000f3'::uuid,
+                      '00000000-0000-0000-0000-0000000000f4'::uuid,
+                      '00000000-0000-0000-0000-0000000000f5'::uuid);
     IF v_real > 0 THEN
         RAISE EXCEPTION
           'runtime_setup: この環境には既存のrunが%件あります。検証用プロジェクトではない可能性が高いため中断します。', v_real;
@@ -99,7 +104,13 @@ ON CONFLICT (id) DO NOTHING;
 
 -- RT01: 確定まで通す正常系＋証跡検証用
 -- RT02: 保留（suspended）の書込み拒否検証用
--- RT03: 並行実行（子行書込み × finalize）検証用
+-- RT03: 証跡の陳腐化検知（登録後にrunを変更）検証用
+-- RT04: 候補の追加・付帯状況変更・除外と比較提示無効化の検証用
+-- RT05: 並行実行（確定 × 子テーブル書込み × Storage書込み）検証用
+--
+-- RT04・RT05は、それぞれ専用のrunを与える。以前は他の検査で使い終わった
+-- run を流用していたため、確定済み・比較提示済みといった前段の状態が残り、
+-- 検査が「実際には何も起きていないのに成功と判定される」状態になっていた。
 INSERT INTO public.run (id, agency_id, operator_id, customer_type, customer_ref,
                         run_type, run_status, customer_decision, meeting_scene,
                         recording_mode, important_matters_delivered)
@@ -112,10 +123,23 @@ VALUES
   'draft', 'renewal_no_change', 'pc_tablet', 'realtime', true),
  ('00000000-0000-0000-0000-0000000000f3', '00000000-0000-0000-0000-0000000000a1',
   '00000000-0000-0000-0000-0000000000b1', 'individual', 'RT-03', 'new_contract',
+  'draft', 'renewal_no_change', 'pc_tablet', 'realtime', true),
+ ('00000000-0000-0000-0000-0000000000f4', '00000000-0000-0000-0000-0000000000a1',
+  '00000000-0000-0000-0000-0000000000b1', 'individual', 'RT-04', 'new_contract',
+  'draft', 'renewal_no_change', 'pc_tablet', 'realtime', true),
+ ('00000000-0000-0000-0000-0000000000f5', '00000000-0000-0000-0000-0000000000a1',
+  '00000000-0000-0000-0000-0000000000b1', 'individual', 'RT-05', 'new_contract',
   'draft', 'renewal_no_change', 'pc_tablet', 'realtime', true)
 ON CONFLICT (id) DO UPDATE
     SET run_status = 'draft', finalized_at = NULL, suspension_type = NULL,
         pending_note = NULL, suspended_at = NULL;
+
+-- RT05は並行実行の検証で確定まで進めるため、あらかじめ有効な候補を1件与える
+-- （比較提示の記録には有効な候補が1件以上必要）。
+INSERT INTO public.candidate (run_id, slot_no, insurer_name, product_name,
+                              annual_premium, role, status)
+VALUES ('00000000-0000-0000-0000-0000000000f5', 1, '検証損保', '検証プラン',
+        50000, 'recommended', 'active');
 
 INSERT INTO public.snapshot (run_id, unresolved_items)
 SELECT id, '{}' FROM public.run WHERE customer_ref LIKE 'RT-0%'
