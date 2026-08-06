@@ -18,6 +18,17 @@
 --     - RLSポリシー（対象ロール・USING式・WITH CHECK式）
 --     - トリガー（定義全文。storage.objects上のものを含む）
 --     - anon / authenticated へのテーブル権限
+--     - 関数のEXECUTE権限（proacl。2026-08-06追加）
+--     - インデックス定義（2026-08-06追加）
+--     - storageバケットの定義（2026-08-06追加）
+--     - 既定権限（pg_default_acl。2026-08-06追加）
+--
+-- 【2026-08-06の重要な修正】
+--   初版はテーブル権限のみを対象としており、関数のEXECUTE権限・インデックス・
+--   バケット・既定権限を見ていなかった。そのため「本番と通し適用後が完全一致」と
+--   判定していても、実際にはこれら4種に差分が存在しうる状態だった。
+--   実際に本番と通し適用後を比較したところ、初版の対象範囲では差分0件であったのに対し、
+--   上記4種を追加したところ差分が検出された。検証範囲より強い主張をしていたことになる。
 --
 -- 実行方法:
 --   psql "<接続文字列>" -f supabase/verification/schema_fingerprint.sql
@@ -85,6 +96,39 @@ grants_def AS (
      WHERE g.table_schema = 'public'
        AND g.grantee IN ('anon', 'authenticated')
 ),
+function_grants_def AS (
+    -- 関数のEXECUTE権限。057・058・059が REVOKE/GRANT ON FUNCTION を多用するため、
+    -- ここを見ていないと「内部専用関数がauthenticatedへ再付与された」といった
+    -- 退行を検出できない。
+    SELECT 'function_grant' AS category,
+           p.proname || '(' || pg_get_function_identity_arguments(p.oid) || ')' || '.' || r.rolname AS object_key,
+           has_function_privilege(r.rolname, p.oid, 'EXECUTE')::text AS definition
+      FROM pg_proc p
+      CROSS JOIN (VALUES ('anon'), ('authenticated'), ('service_role')) AS r(rolname)
+      JOIN pg_namespace n ON n.oid = p.pronamespace
+     WHERE n.nspname = 'public'
+       AND EXISTS (SELECT 1 FROM pg_roles WHERE rolname = r.rolname)
+),
+indexes_def AS (
+    SELECT 'index' AS category,
+           schemaname || '.' || indexname AS object_key,
+           indexdef AS definition
+      FROM pg_indexes
+     WHERE schemaname = 'public'
+),
+buckets_def AS (
+    SELECT 'bucket' AS category,
+           id AS object_key,
+           'public=' || coalesce(public::text, '(null)') AS definition
+      FROM storage.buckets
+),
+default_acl_def AS (
+    SELECT 'default_acl' AS category,
+           coalesce(n.nspname, '(global)') || '.' || d.defaclobjtype::text AS object_key,
+           coalesce(d.defaclacl::text, '(null)') AS definition
+      FROM pg_default_acl d
+      LEFT JOIN pg_namespace n ON n.oid = d.defaclnamespace
+),
 all_rows AS (
     SELECT * FROM columns_def
     UNION ALL SELECT * FROM constraints_def
@@ -93,6 +137,10 @@ all_rows AS (
     UNION ALL SELECT * FROM policies_def
     UNION ALL SELECT * FROM triggers_def
     UNION ALL SELECT * FROM grants_def
+    UNION ALL SELECT * FROM function_grants_def
+    UNION ALL SELECT * FROM indexes_def
+    UNION ALL SELECT * FROM buckets_def
+    UNION ALL SELECT * FROM default_acl_def
 )
 SELECT category, object_key, definition
   FROM all_rows
