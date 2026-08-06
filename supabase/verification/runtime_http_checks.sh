@@ -66,6 +66,24 @@ SH=("${H[@]}" -H "x-upsert: true")
 
 code() { curl -s -o /dev/null -w "%{http_code}" "$@"; }
 
+# migration 064以降、確定にはStorage上の実ファイルから算出したSHA-256の
+# 検証が必須である（未検証なら確定は拒否される）。
+# 検証を挟まないと、以降の否定系検査が「意図した理由」ではなく
+# 「未検証だから」で失敗し、検査として意味を失う。
+verify_proof() { # $1=run_id
+    curl -s -X POST "${SUPABASE_URL}/functions/v1/verify-proof" \
+      -H "apikey: ${SUPABASE_ANON_KEY}" -H "Authorization: Bearer ${JWT}" \
+      -H "Content-Type: application/json" -d "{\"runId\":\"$1\"}"
+}
+verified_ok() { # $1=run_id $2=ラベル
+    local r; r=$(verify_proof "$1")
+    if echo "$r" | grep -q '"verified":true'; then
+        return 0
+    fi
+    ng "$2 の前提となる証跡検証に失敗した（$(echo "$r" | head -c 160)）"
+    return 1
+}
+
 echo
 echo "── 1. run への不正な直接INSERTの拒否 ───────────────────────────────"
 expect_status "確定済み状態でのrun直接INSERT" 400 \
@@ -109,6 +127,25 @@ else
     expect_status "証跡のアップロード（draft中）" 200 \
       "$(code -X POST "${SUPABASE_URL}/storage/v1/object/proofs/${KEY}" "${SH[@]}" --data-binary "@${TMP}")"
 
+    # migration 064: 実ファイル由来のSHA-256による検証を経ていない証跡では
+    # 確定できない（fail-closed）。まずその点を確認する。
+    expect_status "検証を経ていない証跡での確定は拒否" 400 \
+      "$(code -X POST "${SUPABASE_URL}/rest/v1/rpc/finalize_run" "${H[@]}" \
+         -d "{\"p_run_id\":\"${RUN_OK}\",\"p_pdf_object_key\":\"${KEY}\",\"p_pdf_sha256\":\"${SHA}\"}")"
+
+    VR=$(verify_proof "${RUN_OK}")
+    if echo "${VR}" | grep -q '"verified":true'; then
+        ok "実ファイルからのSHA-256検証が成功した"
+    else
+        ng "実ファイルからのSHA-256検証に失敗した（$(echo "${VR}" | head -c 160)）"
+    fi
+    # 検証で得た値が、DBが本文から算出した値と一致していること
+    if echo "${VR}" | grep -q "\"verifiedSha256\":\"${SHA}\""; then
+        ok "実ファイルから算出したSHA-256がDB上の本文の値と一致"
+    else
+        ng "実ファイルから算出したSHA-256がDB上の本文の値と一致しない"
+    fi
+
     echo
     echo "── 4. 証跡の改ざん検知 ─────────────────────────────────────────"
     EVIL=$(mktemp); printf '%s' '{"tampered":"different-length-content"}' > "${EVIL}"
@@ -116,12 +153,23 @@ else
     expect_status "改ざんされた証跡での確定は拒否" 400 \
       "$(code -X POST "${SUPABASE_URL}/rest/v1/rpc/finalize_run" "${H[@]}" \
          -d "{\"p_run_id\":\"${RUN_OK}\",\"p_pdf_object_key\":\"${KEY}\",\"p_pdf_sha256\":\"${SHA}\"}")"
+    # 改ざんされた実体に対する検証は、ハッシュ不一致として拒否される
+    if verify_proof "${RUN_OK}" | grep -q 'does not match the registered proof content'; then
+        ok "改ざんされた実体に対する検証は拒否された"
+    else
+        ng "改ざんされた実体に対する検証が拒否されなかった"
+    fi
     expect_status "申告ハッシュの偽装は拒否" 400 \
       "$(code -X POST "${SUPABASE_URL}/rest/v1/rpc/finalize_run" "${H[@]}" \
          -d "{\"p_run_id\":\"${RUN_OK}\",\"p_pdf_object_key\":\"${KEY}\",\"p_pdf_sha256\":\"1111111111111111111111111111111111111111111111111111111111111111\"}")"
 
-    # 正しい内容へ戻してから確定
+    # 正しい内容へ戻し、再検証してから確定する。
+    # 実体を上げ直した時点で以前の検証結果は無効化されるため、再検証が必要になる。
     code -X POST "${SUPABASE_URL}/storage/v1/object/proofs/${KEY}" "${SH[@]}" --data-binary "@${TMP}" >/dev/null
+    expect_status "実体を戻しただけでは確定できない（再検証が必要）" 400 \
+      "$(code -X POST "${SUPABASE_URL}/rest/v1/rpc/finalize_run" "${H[@]}" \
+         -d "{\"p_run_id\":\"${RUN_OK}\",\"p_pdf_object_key\":\"${KEY}\",\"p_pdf_sha256\":\"${SHA}\"}")"
+    verified_ok "${RUN_OK}" "正しい証跡での確定" || true
     expect_status "正しい証跡での確定は成功" 204 \
       "$(code -X POST "${SUPABASE_URL}/rest/v1/rpc/finalize_run" "${H[@]}" \
          -d "{\"p_run_id\":\"${RUN_OK}\",\"p_pdf_object_key\":\"${KEY}\",\"p_pdf_sha256\":\"${SHA}\"}")"
@@ -149,6 +197,9 @@ S2=$(echo "$P2" | sed -n 's/.*"sha256":"\([^"]*\)".*/\1/p')
 PL2=$(echo "$P2" | python3 -c 'import sys,json; print(json.load(sys.stdin)[0]["payload"])' 2>/dev/null)
 T2=$(mktemp); printf '%s' "${PL2}" > "${T2}"
 code -X POST "${SUPABASE_URL}/storage/v1/object/proofs/${K2}" "${SH[@]}" --data-binary "@${T2}" >/dev/null
+# 検証まで済ませる。ここを省くと、この後の確定が「陳腐化したから」ではなく
+# 「未検証だから」拒否されることになり、本項の検査にならない。
+verified_ok "${RUN_RACE}" "証跡の陳腐化検知" || true
 # 登録後にrunを変更する（draft中の正当な変更）
 code -X PATCH "${SUPABASE_URL}/rest/v1/run?id=eq.${RUN_RACE}" "${H[@]}" \
   -d '{"customer_intent_memo":"証跡登録後に変更した内容"}' >/dev/null
@@ -327,6 +378,9 @@ if [ -z "${K3}" ] || [ -z "${PL3}" ]; then
 fi
 T3=$(mktemp); printf '%s' "${PL3}" > "${T3}"
 code -X POST "${SUPABASE_URL}/storage/v1/object/proofs/${K3}" "${SH[@]}" --data-binary "@${T3}" >/dev/null
+# 実ファイル由来のSHA-256検証まで済ませ、確定できる状態にしてから競合させる。
+# 未検証のままだと確定が必ず失敗し、並行実行の検証にならない。
+verified_ok "${RACE_RUN}" "並行実行" || true
 
 # 前提: この時点で run はまだ確定していないこと。
 # 確定済みのrunに対して実施すると、すべてが「確定済みだから拒否」になり、

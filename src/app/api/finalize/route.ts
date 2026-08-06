@@ -154,6 +154,25 @@ export async function POST(request: Request) {
             return Response.json({ error: `proof upload failed: ${uploadErr.message}` }, { status: 500 })
         }
 
+        // ── Storage上の実ファイルからSHA-256を再計算して検証する ──
+        // 田島様2026-08-06ご指摘2: DB上の本文に対するSHA-256とサイズ・eTagの照合では
+        // 条件を満たさない。信頼できるサーバー側の処理でStorage上の実体を取得し、
+        // その実バイト列からSHA-256を算出して、検証済みの値として保存する。
+        //
+        // 算出はEdge Function（service_roleで動作）が行う。アプリもブラウザも
+        // ハッシュ値には関与しないため、呼出し元が値を偽装する余地はない。
+        // 検証が済んでいない証跡では finalize_run() が確定を拒否する（fail-closed）。
+        const { error: verifyErr } = await supabase.functions.invoke('verify-proof', {
+            body: { runId },
+        })
+        if (verifyErr) {
+            const detail = verifyErr instanceof Error ? verifyErr.message : String(verifyErr)
+            return Response.json(
+                { error: `保存された証跡の検証に失敗しました: ${detail}` },
+                { status: 500 },
+            )
+        }
+
         // ── Atomic finalize via RPC ──
         // b1-MS1 Stage 3: finalize_run now derives the caller's operator identity
         // from auth.uid() internally (rather than trusting the p_operator_id

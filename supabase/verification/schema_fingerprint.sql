@@ -129,6 +129,32 @@ default_acl_def AS (
       FROM pg_default_acl d
       LEFT JOIN pg_namespace n ON n.oid = d.defaclnamespace
 ),
+schema_priv_def AS (
+    -- スキーマ利用権限。2026-08-06追加。
+    -- これを見ていなかったため、migration 059が `GRANT USAGE ON SCHEMA public` を
+    -- service_role へ付与していない点を検出できなかった。本番はプロジェクト作成時の
+    -- 初期設定で保持しているため差分が表面化せず、ゼロからの通し適用後のDBでのみ
+    -- サーバー側処理が動かない状態になっていた（migration 064で是正）。
+    SELECT 'schema_priv' AS category,
+           n.nspname || '.' || r.rolname || '.' || p.priv AS object_key,
+           has_schema_privilege(r.rolname, n.nspname, p.priv)::text AS definition
+      FROM pg_namespace n
+      CROSS JOIN (VALUES ('anon'), ('authenticated'), ('service_role')) AS r(rolname)
+      CROSS JOIN (VALUES ('USAGE'), ('CREATE')) AS p(priv)
+     WHERE n.nspname IN ('public', 'storage')
+       AND EXISTS (SELECT 1 FROM pg_roles WHERE rolname = r.rolname)
+),
+service_role_table_grants AS (
+    -- service_role のテーブル権限。2026-08-06追加。
+    -- 従来のgrants_defは anon・authenticated のみを対象としており、
+    -- サーバー側処理が用いる service_role の到達範囲を比較していなかった。
+    SELECT 'service_grant' AS category,
+           g.table_name || '.' || g.privilege_type AS object_key,
+           'granted' AS definition
+      FROM information_schema.role_table_grants g
+     WHERE g.table_schema = 'public'
+       AND g.grantee = 'service_role'
+),
 all_rows AS (
     SELECT * FROM columns_def
     UNION ALL SELECT * FROM constraints_def
@@ -141,6 +167,8 @@ all_rows AS (
     UNION ALL SELECT * FROM indexes_def
     UNION ALL SELECT * FROM buckets_def
     UNION ALL SELECT * FROM default_acl_def
+    UNION ALL SELECT * FROM schema_priv_def
+    UNION ALL SELECT * FROM service_role_table_grants
 )
 SELECT category, object_key, definition
   FROM all_rows

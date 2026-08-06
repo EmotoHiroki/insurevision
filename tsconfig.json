@@ -30,5 +30,5 @@
     ".next/dev/types/**/*.ts",
     "**/*.mts"
   ],
-  "exclude": ["node_modules", "docs-unified"]
+  "exclude": ["node_modules", "docs-unified", "supabase/functions"]
 }
