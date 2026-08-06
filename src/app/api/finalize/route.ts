@@ -77,8 +77,22 @@ export async function POST(request: Request) {
             return Response.json({ error: 'compare_presented_at not set' }, { status: 422 })
         }
 
-        // Phase2-a: important_matters_delivered gate (only when meeting_scene is set)
-        if (run.meeting_scene && !run.important_matters_delivered) {
+        // 田島様2026-08-06ご指摘6: meeting_scene・recording_mode はDB側
+        // （finalize_run）では確定の必須条件だが、API側はこれらの不足を
+        // 証跡登録・Storageアップロードより前に拒否していなかった。この結果、
+        // 最終的にDBで拒否されるとしても、失敗が確定している案件の証跡登録と
+        // アップロードが先に実行され得た（副作用が先に走る）。
+        // これはDB側で是正した「NULLの場合に検査自体がスキップされる」構図と
+        // 同型であり、直下の important_matters の検査も
+        // `run.meeting_scene &&` を条件にしていたため、meeting_sceneがNULLだと
+        // 検査ごとスキップされていた。画面・API・DBを同一基準に揃える。
+        if (!run.meeting_scene) {
+            return Response.json({ error: '面談シーン（meeting_scene）が未設定です' }, { status: 422 })
+        }
+        if (!run.recording_mode) {
+            return Response.json({ error: '記録方式（recording_mode）が未設定です' }, { status: 422 })
+        }
+        if (!run.important_matters_delivered) {
             return Response.json({ error: '重要事項説明書の交付確認が完了していません' }, { status: 422 })
         }
 

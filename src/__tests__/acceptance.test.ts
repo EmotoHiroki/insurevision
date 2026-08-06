@@ -37,9 +37,6 @@ import type {
     CustomerDecision,
     RunType,
     AuditEventType,
-    Run,
-    Snapshot,
-    MinimalProofPdfStub,
 } from '@/lib/types'
 
 import { getMissingGuideMessage, getUncertainGuideMessage } from '@/lib/flagGuides'
@@ -49,48 +46,19 @@ import { t } from '@/lib/i18n'
 // Pure-logic helpers (mirror production implementations, no side effects)
 // ─────────────────────────────────────────────────────────────────────────────
 
-/** Mirrors buildMinimalProofStub() in src/app/api/finalize/route.ts */
-function buildMinimalProofStub(
-    run: Partial<Run> & {
-        id: string
-        customer_ref: string
-        customer_decision: CustomerDecision
-        customer_intent_memo: string | null
-        operator_id: string
-        compare_presented_at?: string | null
-    },
-    snapshot: Partial<Snapshot> | null,
-    consentFlags: { comparison_result: boolean; important_matters: boolean; personal_info: boolean }
-): MinimalProofPdfStub & Record<string, unknown> {
-    const stub: MinimalProofPdfStub & Record<string, unknown> = {
-        run_id: run.id,
-        customer_ref: run.customer_ref,
-        operator_name: run.operator_id,
-        generated_at: new Date().toISOString(),
-        customer_decision: run.customer_decision,
-        decision_reason: run.customer_intent_memo ?? '',
-        insurer_list_presented: true, // always true: auto-recorded at Step2→3 for ALL paths
-    }
+// 注記（2026-08-06）: 証跡本文の組立ては migration 057 で DB 側
+// （save_run_proof / build_run_proof_payload）へ移した。アプリ側の
+// buildMinimalProofStub は廃止済みのため、それを模倣していたローカル関数と
+// 対応するテストも削除した。証跡本文の内容は、DB側の検証SQL
+// （supabase/verification/058_proof_and_suspended_check.sql）および
+// 実HTTPスクリプトで検証する。
 
-    if (run.customer_decision === 'comparison_waived') {
-        stub.consent_important_matters = consentFlags.important_matters
-        stub.consent_personal_info = consentFlags.personal_info
-    }
-
-    if (run.customer_decision === 'compare') {
-        stub.consent_comparison_result = consentFlags.comparison_result
-    }
-
-    if (snapshot) {
-        stub.confirmed_items = snapshot.confirmed_items
-        stub.supplemented_items = snapshot.supplemented_items
-        stub.core_logic_version = snapshot.core_logic_version
-    }
-
-    return stub
-}
-
-/** Mirrors validateFinalizeRequest() in src/app/api/finalize/route.ts */
+/** Mirrors the finalize pre-checks in src/app/api/finalize/route.ts
+ *  （2026-08-06更新: 現行実装に追随。snapshot不存在の拒否、meeting_scene・
+ *   recording_mode・important_matters_delivered の必須化、および
+ *   exceptionRoute をクライアント入力ではなく customer_decision から
+ *   サーバ側で導出する点を反映している）
+ */
 interface FinalizeInput {
     run: {
         run_status: string
@@ -98,26 +66,42 @@ interface FinalizeInput {
         compare_presented_at?: string | null
         recording_mode?: string | null
         post_record_status?: string | null
+        meeting_scene?: string | null
+        important_matters_delivered?: boolean | null
     }
     snapshot: { unresolved_items: string[] } | null
-    exceptionRoute: boolean
+    /** 現行実装では customer_decision から導出するため、渡されても使用しない */
+    exceptionRoute?: boolean
+    /** insurer_list_presented が記録済みか（route.ts は audit_event を照会する） */
+    insurerListPresented?: boolean
 }
 
 function validateFinalizeRequest(
     input: FinalizeInput
 ): { ok: boolean; status: number; error?: string; items?: string[] } {
-    const { run, snapshot, exceptionRoute } = input
+    const { run, snapshot } = input
+    const insurerListPresented = input.insurerListPresented ?? true
 
-    // G-21: allow 'draft' or 'post_record_pending'
+    // route.ts と同じく customer_decision から導出する（クライアント値は信用しない）
+    const exceptionRoute = run.customer_decision !== 'compare'
+
     if (run.run_status !== 'draft' && run.run_status !== 'post_record_pending') {
         return { ok: false, status: 400, error: 'already finalized' }
     }
 
-    if (snapshot && snapshot.unresolved_items.length > 0) {
+    // Fail-Closed: snapshot は存在必須（不存在を合格扱いにしない）
+    if (!snapshot) {
+        return { ok: false, status: 422, error: 'snapshot not found' }
+    }
+
+    if (snapshot.unresolved_items.length > 0) {
         return { ok: false, status: 422, error: 'unresolved_items', items: snapshot.unresolved_items }
     }
 
-    // G-21: post_record requires phase2_done before finalize (exception routes bypass)
+    if (!insurerListPresented) {
+        return { ok: false, status: 422, error: 'insurer_list_presented not recorded' }
+    }
+
     if (!exceptionRoute && run.recording_mode === 'post_record' && run.post_record_status !== 'phase2_done') {
         return { ok: false, status: 422, error: '事後記録のフェーズ2が完了していません' }
     }
@@ -126,7 +110,33 @@ function validateFinalizeRequest(
         return { ok: false, status: 422, error: 'compare_presented_at not set' }
     }
 
+    // 確定の必須条件（DB側 finalize_run と同一基準）
+    if (!run.meeting_scene) {
+        return { ok: false, status: 422, error: '面談シーン（meeting_scene）が未設定です' }
+    }
+    if (!run.recording_mode) {
+        return { ok: false, status: 422, error: '記録方式（recording_mode）が未設定です' }
+    }
+    if (!run.important_matters_delivered) {
+        return { ok: false, status: 422, error: '重要事項説明書の交付確認が完了していません' }
+    }
+
     return { ok: true, status: 200 }
+}
+
+/** 確定条件をすべて満たす run のベース。
+ *  各テストは検証対象の項目だけを上書きし、他の必須条件で落ちないようにする。
+ *  （2026-08-06追加: meeting_scene・recording_mode・important_matters_delivered が
+ *   確定の必須条件になったため、個別テストの意図を保つ目的で導入）
+ */
+const FINALIZE_OK_RUN = {
+    run_status: 'draft',
+    customer_decision: 'compare',
+    compare_presented_at: '2026-01-01T00:00:00Z',
+    recording_mode: 'realtime',
+    post_record_status: null,
+    meeting_scene: 'pc_tablet',
+    important_matters_delivered: true,
 }
 
 /** Mirrors createRunAndFireEvents() in src/app/run/new/page.tsx */
@@ -335,91 +345,6 @@ describe('information_refused audit event batch structure', () => {
 })
 
 // ─────────────────────────────────────────────────────────────────────────────
-// INVARIANT: MinimalProofPdfStub の内容が経路ごとに正しいこと
-//            (例外経路 PDF stub の構造検証)
-// ─────────────────────────────────────────────────────────────────────────────
-describe('MinimalProofPdfStub content per decision path', () => {
-    const baseRun = {
-        id: 'run-abc',
-        customer_ref: 'C-2026-0001',
-        operator_id: 'op-001',
-        customer_intent_memo: '顧客の意向をテストで確認するメモ',
-    }
-
-    it('insurer_list_presented is always true (all 4 paths)', () => {
-        const decisions: CustomerDecision[] = [
-            'compare',
-            'renewal_no_change',
-            'information_refused',
-            'comparison_waived',
-        ]
-        decisions.forEach(decision => {
-            const stub = buildMinimalProofStub(
-                { ...baseRun, customer_decision: decision },
-                null,
-                { comparison_result: false, important_matters: false, personal_info: false }
-            )
-            expect(stub.insurer_list_presented).toBe(true)
-        })
-    })
-
-    it('compare path → consent_comparison_result included; consent_important_matters/personal_info absent', () => {
-        const stub = buildMinimalProofStub(
-            { ...baseRun, customer_decision: 'compare', compare_presented_at: '2026-03-17T10:00:00Z' },
-            null,
-            { comparison_result: true, important_matters: false, personal_info: false }
-        )
-
-        expect(stub.consent_comparison_result).toBe(true)
-        expect(stub.consent_important_matters).toBeUndefined()
-        expect(stub.consent_personal_info).toBeUndefined()
-    })
-
-    it('comparison_waived path → consent_important_matters + consent_personal_info included', () => {
-        const stub = buildMinimalProofStub(
-            { ...baseRun, customer_decision: 'comparison_waived' },
-            null,
-            { comparison_result: false, important_matters: true, personal_info: true }
-        )
-
-        expect(stub.consent_important_matters).toBe(true)
-        expect(stub.consent_personal_info).toBe(true)
-        expect(stub.consent_comparison_result).toBeUndefined()
-    })
-
-    it('information_refused path → minimal stub (no consent fields)', () => {
-        const stub = buildMinimalProofStub(
-            { ...baseRun, customer_decision: 'information_refused' },
-            null,
-            { comparison_result: false, important_matters: false, personal_info: false }
-        )
-
-        expect(stub.customer_decision).toBe('information_refused')
-        expect(stub.consent_comparison_result).toBeUndefined()
-        expect(stub.consent_important_matters).toBeUndefined()
-    })
-
-    it('snapshot data is merged into stub when provided', () => {
-        const snapshot: Partial<Snapshot> = {
-            confirmed_items: ['option_a'],
-            supplemented_items: ['option_b'],
-            unresolved_items: [],
-            core_logic_version: '1.0.0',
-        }
-
-        const stub = buildMinimalProofStub(
-            { ...baseRun, customer_decision: 'information_refused' },
-            snapshot,
-            { comparison_result: false, important_matters: false, personal_info: false }
-        )
-
-        expect(stub.confirmed_items).toEqual(['option_a'])
-        expect(stub.supplemented_items).toEqual(['option_b'])
-        expect(stub.core_logic_version).toBe('1.0.0')
-    })
-})
-
-// ─────────────────────────────────────────────────────────────────────────────
 // INVARIANT: customerIntentMemo 最小15文字バリデーション
 // ─────────────────────────────────────────────────────────────────────────────
 describe('customerIntentMemo minimum 15 characters', () => {
@@ -531,12 +456,11 @@ describe('compare path requires compare_presented_at', () => {
     it('exception route → compare_presented_at NOT required', () => {
         const result = validateFinalizeRequest({
             run: {
-                run_status: 'draft',
+                ...FINALIZE_OK_RUN,
                 customer_decision: 'renewal_no_change',
                 compare_presented_at: null,
             },
             snapshot: { unresolved_items: [] },
-            exceptionRoute: true,
         })
 
         expect(result.ok).toBe(true)
@@ -545,12 +469,10 @@ describe('compare path requires compare_presented_at', () => {
     it('compare path + compare_presented_at set → passes', () => {
         const result = validateFinalizeRequest({
             run: {
-                run_status: 'draft',
-                customer_decision: 'compare',
+                ...FINALIZE_OK_RUN,
                 compare_presented_at: '2026-03-17T10:00:00Z',
             },
             snapshot: { unresolved_items: [] },
-            exceptionRoute: false,
         })
 
         expect(result.ok).toBe(true)
@@ -582,26 +504,25 @@ describe('TC10 — Fail-Closed: unresolved uncertain items block finalize (M1 v4
 
     it('unresolved_items=[] → Fail-Closed gate passes', () => {
         const result = validateFinalizeRequest({
-            run: {
-                run_status: 'draft',
-                customer_decision: 'compare',
-                compare_presented_at: '2026-01-01T00:00:00Z',
-            },
+            run: { ...FINALIZE_OK_RUN },
             snapshot: { unresolved_items: [] },
-            exceptionRoute: false,
         })
 
         expect(result.ok).toBe(true)
     })
 
-    it('snapshot=null → gate passes (no snapshot to evaluate)', () => {
+    // 2026-08-06訂正: 旧テストは「snapshot不存在は評価対象が無いので通過」と
+    // していたが、現行実装は例外ルートを含めて snapshot 不存在を拒否する
+    // （Fail-Closed）。現行仕様を正としてテストを反転させた。
+    it('snapshot=null → 422 で拒否される（例外ルートでも同じ）', () => {
         const result = validateFinalizeRequest({
-            run: { run_status: 'draft', customer_decision: 'information_refused' },
+            run: { ...FINALIZE_OK_RUN, customer_decision: 'information_refused', compare_presented_at: null },
             snapshot: null,
-            exceptionRoute: true,
         })
 
-        expect(result.ok).toBe(true)
+        expect(result.ok).toBe(false)
+        expect(result.status).toBe(422)
+        expect(result.error).toBe('snapshot not found')
     })
 })
 
@@ -610,6 +531,93 @@ describe('TC10 — Fail-Closed: unresolved uncertain items block finalize (M1 v4
 //         Finalize不可（記録 ≠ ゲートのクリア）
 //  ※ M1 v4.1 設計書 TC11 の定義に一致
 // ─────────────────────────────────────────────────────────────────────────────
+// ─────────────────────────────────────────────────────────────────────────────
+// 田島様2026-08-06ご指摘4: 確定ゲートの否定系を現行仕様で網羅する
+//   （snapshot不存在・NULL・未解決項目あり／meeting_scene・recording_mode不足）
+// ─────────────────────────────────────────────────────────────────────────────
+describe('確定ゲートの否定系（現行仕様）', () => {
+    it('snapshot不存在 → 422（通常ルート）', () => {
+        const r = validateFinalizeRequest({ run: { ...FINALIZE_OK_RUN }, snapshot: null })
+        expect(r.ok).toBe(false)
+        expect(r.status).toBe(422)
+        expect(r.error).toBe('snapshot not found')
+    })
+
+    it('snapshot不存在 → 422（例外ルートでも同じ）', () => {
+        const r = validateFinalizeRequest({
+            run: { ...FINALIZE_OK_RUN, customer_decision: 'comparison_waived', compare_presented_at: null },
+            snapshot: null,
+        })
+        expect(r.ok).toBe(false)
+        expect(r.status).toBe(422)
+        expect(r.error).toBe('snapshot not found')
+    })
+
+    it('未解決項目が残っている → 422（例外ルートでも拒否される）', () => {
+        const r = validateFinalizeRequest({
+            run: { ...FINALIZE_OK_RUN, customer_decision: 'information_refused', compare_presented_at: null },
+            snapshot: { unresolved_items: ['築年数が不明'] },
+        })
+        expect(r.ok).toBe(false)
+        expect(r.status).toBe(422)
+        expect(r.error).toBe('unresolved_items')
+        expect(r.items).toEqual(['築年数が不明'])
+    })
+
+    it('meeting_scene未設定 → 422', () => {
+        const r = validateFinalizeRequest({
+            run: { ...FINALIZE_OK_RUN, meeting_scene: null },
+            snapshot: { unresolved_items: [] },
+        })
+        expect(r.ok).toBe(false)
+        expect(r.status).toBe(422)
+        expect(r.error).toContain('meeting_scene')
+    })
+
+    it('recording_mode未設定 → 422', () => {
+        const r = validateFinalizeRequest({
+            run: { ...FINALIZE_OK_RUN, recording_mode: null },
+            snapshot: { unresolved_items: [] },
+        })
+        expect(r.ok).toBe(false)
+        expect(r.status).toBe(422)
+        expect(r.error).toContain('recording_mode')
+    })
+
+    it('重要事項の交付未確認 → 422（meeting_sceneの有無に関わらず検査される）', () => {
+        const r = validateFinalizeRequest({
+            run: { ...FINALIZE_OK_RUN, important_matters_delivered: false },
+            snapshot: { unresolved_items: [] },
+        })
+        expect(r.ok).toBe(false)
+        expect(r.status).toBe(422)
+        expect(r.error).toContain('重要事項')
+    })
+
+    it('insurer_list_presented未記録 → 422', () => {
+        const r = validateFinalizeRequest({
+            run: { ...FINALIZE_OK_RUN },
+            snapshot: { unresolved_items: [] },
+            insurerListPresented: false,
+        })
+        expect(r.ok).toBe(false)
+        expect(r.status).toBe(422)
+        expect(r.error).toBe('insurer_list_presented not recorded')
+    })
+
+    it('exceptionRouteはクライアント入力ではなくcustomer_decisionから導出される', () => {
+        // 呼出し側が exceptionRoute=true を主張しても、customer_decision='compare'
+        // であれば通常ルートとして compare_presented_at が必須になる
+        const r = validateFinalizeRequest({
+            run: { ...FINALIZE_OK_RUN, customer_decision: 'compare', compare_presented_at: null },
+            snapshot: { unresolved_items: [] },
+            exceptionRoute: true,
+        })
+        expect(r.ok).toBe(false)
+        expect(r.error).toBe('compare_presented_at not set')
+    })
+})
+
 describe('TC11 — manual_review_completed recorded ≠ Fail-Closed gate cleared (M1 v4.1 TC11)', () => {
     it('manual_review_completed IS in event batch while unresolved_items remain → finalize still blocked', () => {
         // Step 1: confirm manual_review_completed IS recorded in the event batch
@@ -653,13 +661,8 @@ describe('TC11 — manual_review_completed recorded ≠ Fail-Closed gate cleared
     it('only after snapshot.unresolved_items is emptied does the gate open', () => {
         // Simulate: operator has manually resolved all items → snapshot updated
         const finalizeResult = validateFinalizeRequest({
-            run: {
-                run_status: 'draft',
-                customer_decision: 'compare',
-                compare_presented_at: '2026-03-17T10:00:00Z',
-            },
+            run: { ...FINALIZE_OK_RUN, compare_presented_at: '2026-03-17T10:00:00Z' },
             snapshot: { unresolved_items: [] }, // resolved
-            exceptionRoute: false,
         })
 
         expect(finalizeResult.ok).toBe(true)
@@ -878,13 +881,13 @@ describe('M3 TC32–TC34: G-21 事後記録フェーズ finalize validation', ()
     it('TC32: post_record_pending status is accepted by finalize gate', () => {
         const result = validateFinalizeRequest({
             run: {
+                ...FINALIZE_OK_RUN,
                 run_status: 'post_record_pending',
                 recording_mode: 'post_record',
                 post_record_status: 'phase2_done',
                 compare_presented_at: '2026-04-23T10:00:00Z',
             },
             snapshot: { unresolved_items: [] },
-            exceptionRoute: false,
         })
         expect(result.ok).toBe(true)
     })
@@ -892,13 +895,13 @@ describe('M3 TC32–TC34: G-21 事後記録フェーズ finalize validation', ()
     it('TC33: finalize succeeds when post_record_status=phase2_done', () => {
         const result = validateFinalizeRequest({
             run: {
+                ...FINALIZE_OK_RUN,
                 run_status: 'post_record_pending',
                 recording_mode: 'post_record',
                 post_record_status: 'phase2_done',
                 compare_presented_at: '2026-04-23T10:00:00Z',
             },
             snapshot: { unresolved_items: [] },
-            exceptionRoute: false,
         })
         expect(result.ok).toBe(true)
         expect(result.status).toBe(200)
@@ -907,13 +910,13 @@ describe('M3 TC32–TC34: G-21 事後記録フェーズ finalize validation', ()
     it('TC34: finalize fails 422 when post_record and phase2 not done', () => {
         const result = validateFinalizeRequest({
             run: {
+                ...FINALIZE_OK_RUN,
                 run_status: 'post_record_pending',
                 recording_mode: 'post_record',
                 post_record_status: 'phase1_done',
                 compare_presented_at: '2026-04-23T10:00:00Z',
             },
             snapshot: { unresolved_items: [] },
-            exceptionRoute: false,
         })
         expect(result.ok).toBe(false)
         expect(result.status).toBe(422)
@@ -923,13 +926,13 @@ describe('M3 TC32–TC34: G-21 事後記録フェーズ finalize validation', ()
     it('TC34: finalize fails when post_record_status is null', () => {
         const result = validateFinalizeRequest({
             run: {
+                ...FINALIZE_OK_RUN,
                 run_status: 'post_record_pending',
                 recording_mode: 'post_record',
                 post_record_status: null,
                 compare_presented_at: '2026-04-23T10:00:00Z',
             },
             snapshot: { unresolved_items: [] },
-            exceptionRoute: false,
         })
         expect(result.ok).toBe(false)
         expect(result.status).toBe(422)
@@ -938,13 +941,13 @@ describe('M3 TC32–TC34: G-21 事後記録フェーズ finalize validation', ()
     it('exception route bypasses post_record phase2 check', () => {
         const result = validateFinalizeRequest({
             run: {
-                run_status: 'draft',
+                ...FINALIZE_OK_RUN,
+                customer_decision: 'renewal_no_change',
                 recording_mode: 'post_record',
                 post_record_status: null,
                 compare_presented_at: null,
             },
             snapshot: { unresolved_items: [] },
-            exceptionRoute: true,
         })
         expect(result.ok).toBe(true)
     })
@@ -952,13 +955,12 @@ describe('M3 TC32–TC34: G-21 事後記録フェーズ finalize validation', ()
     it('realtime mode ignores post_record phase check', () => {
         const result = validateFinalizeRequest({
             run: {
-                run_status: 'draft',
+                ...FINALIZE_OK_RUN,
                 recording_mode: 'realtime',
                 post_record_status: null,
                 compare_presented_at: '2026-04-23T10:00:00Z',
             },
             snapshot: { unresolved_items: [] },
-            exceptionRoute: false,
         })
         expect(result.ok).toBe(true)
     })
@@ -966,13 +968,13 @@ describe('M3 TC32–TC34: G-21 事後記録フェーズ finalize validation', ()
     it('finalized status is rejected (400) regardless of recording_mode', () => {
         const result = validateFinalizeRequest({
             run: {
+                ...FINALIZE_OK_RUN,
                 run_status: 'finalized',
                 recording_mode: 'post_record',
                 post_record_status: 'phase2_done',
                 compare_presented_at: '2026-04-23T10:00:00Z',
             },
             snapshot: { unresolved_items: [] },
-            exceptionRoute: false,
         })
         expect(result.ok).toBe(false)
         expect(result.status).toBe(400)

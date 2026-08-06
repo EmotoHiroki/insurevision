@@ -1,0 +1,58 @@
+# migration 059 適用前の本番ACL全量（記録用）
+# 取得日: 2026-08-06  対象: project ytpaklotlgrbslshjggc / schema public
+# 田島様2026-08-06ご指摘3「適用前に本番の現行ACL全量を記録として保全」への対応
+# 形式: table_name<TAB>grantee<TAB>privilege_type
+
+agency_config	anon	INSERT
+agency_config	anon	SELECT
+agency_config	anon	UPDATE
+agency_config	authenticated	INSERT
+agency_config	authenticated	SELECT
+agency_config	authenticated	UPDATE
+agency_rule_override	anon	INSERT
+agency_rule_override	anon	SELECT
+agency_rule_override	anon	UPDATE
+agency_rule_override	authenticated	INSERT
+agency_rule_override	authenticated	SELECT
+agency_rule_override	authenticated	UPDATE
+audit_event	anon	SELECT
+audit_event	authenticated	INSERT
+audit_event	authenticated	SELECT
+candidate	anon	SELECT
+candidate	authenticated	SELECT
+coverage_rule_master	anon	SELECT
+coverage_rule_master	authenticated	SELECT
+csv_import_session	anon	INSERT
+csv_import_session	anon	SELECT
+csv_import_session	anon	UPDATE
+csv_import_session	authenticated	INSERT
+csv_import_session	authenticated	SELECT
+csv_import_session	authenticated	UPDATE
+flood_zone_master	anon	SELECT
+flood_zone_master	authenticated	SELECT
+insurance_category	anon	SELECT
+insurance_category	authenticated	SELECT
+insurance_line	anon	SELECT
+insurance_line	authenticated	SELECT
+intent_confirmation	anon	INSERT
+intent_confirmation	anon	SELECT
+intent_confirmation	anon	UPDATE
+intent_confirmation	authenticated	INSERT
+intent_confirmation	authenticated	SELECT
+intent_confirmation	authenticated	UPDATE
+operator	anon	SELECT
+operator	authenticated	INSERT
+operator	authenticated	SELECT
+property_profile	anon	SELECT
+property_profile	authenticated	SELECT
+restriction_reason_master	anon	SELECT
+restriction_reason_master	authenticated	SELECT
+run	anon	SELECT
+run	authenticated	INSERT
+run	authenticated	SELECT
+run	authenticated	UPDATE
+snapshot	anon	SELECT
+snapshot	authenticated	INSERT
+snapshot	authenticated	SELECT
+
+# 合計 51 行
