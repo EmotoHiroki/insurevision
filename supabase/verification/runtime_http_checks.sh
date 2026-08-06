@@ -424,31 +424,42 @@ FINAL_STATUS=$(curl -s "${SUPABASE_URL}/rest/v1/run?id=eq.${RACE_RUN}&select=run
 # 競合して書き込まれても証跡の内容と矛盾しない。証跡の構成要素
 # （run・snapshot・audit_event）が確定前に変化した場合は、
 # 058の再構築・比較により確定自体が拒否される（§7で検証済み）。
+#
+# 【判定件数を一定にする】
+# 分岐ごとに判定の数が変わると、実行のたびに合計件数が変動し、
+# 資料に記載した件数と一致しなくなる。どちらの分岐でも
+# 同じ3件を判定する形にそろえる。競合の勝敗は判定ではなく参考情報として出力する。
+if [ "${CHILD}" = "201" ]; then
+    echo "  （今回は子テーブル書込みが先に成立した。draft中の正当な書込みである）"
+else
+    echo "  （今回は確定が先に成立し、子テーブル書込みは拒否された）"
+fi
+
+# (1) 状態が中途半端になっていないこと。
+#     直列化されている以上、確定したか、まだdraftのままかのいずれかである。
+if [ "${FINAL_STATUS}" = "finalized" ] || [ "${FINAL_STATUS}" = "draft" ]; then
+    ok "並行実行後のrun_statusが一貫している（${FINAL_STATUS}）"
+else
+    ng "並行実行後のrun_statusが想定外（${FINAL_STATUS}）"
+fi
+
+# (2) 現在の状態に対して、子テーブル書込みの可否が正しいこと。
+#     確定済みなら拒否され、draftのままなら受け付けられる。
+#     どちらの分岐でも1件の判定になる。
+CHILD_AFTER=$(code -X POST "${SUPABASE_URL}/rest/v1/intent_confirmation" "${H[@]}" \
+                -d "{\"run_id\":\"${RACE_RUN}\"}")
 if [ "${FINAL_STATUS}" = "finalized" ]; then
-    ok "確定が成立し、run_status=finalized で確定した"
-
-    if [ "${STOR}" = "200" ] && [ "${FIN}" = "204" ]; then
-        # Storageの上書きは確定後には拒否されなければならない。
-        # 両方成功した場合は、上書きが確定前に到達したことを意味するため、
-        # バイト列が登録内容と一致しているかで健全性を判断する。
-        ok "Storage上書きは確定前に到達した (HTTP ${STOR})。バイト列は後段で検証する"
-    elif [ "${STOR}" != "200" ]; then
-        ok "確定と競合したStorage上書きは拒否された (HTTP ${STOR})"
-    fi
-
-    # (b) 確定が成立した以上、これ以降の子テーブル書込みは必ず拒否される
-    expect_status "確定成立後の子テーブル書込みは拒否" 400 \
-      "$(code -X POST "${SUPABASE_URL}/rest/v1/intent_confirmation" "${H[@]}" \
-         -d "{\"run_id\":\"${RACE_RUN}\"}")"
-
-    # 競合した書込みが確定後にすり抜けていないこと。
-    # 子テーブル書込みが成功した場合、それは確定より前に成立したはずなので、
-    # 「確定済みのrunに対して直接INSERTが通った」状態になっていてはならない。
-    if [ "${CHILD}" = "201" ]; then
-        echo "  （子テーブル書込みが先に成立した。draft中の正当な書込みとして扱う）"
+    if [ "${CHILD_AFTER}" = "400" ]; then
+        ok "確定成立後の子テーブル書込みは拒否 (HTTP ${CHILD_AFTER})"
+    else
+        ng "確定済みrunへの子テーブル書込みが通った (HTTP ${CHILD_AFTER})"
     fi
 else
-    ok "確定は競合により成立しなかった（run_status=${FINAL_STATUS}）。中途半端な状態は生じていない"
+    if [ "${CHILD_AFTER}" = "201" ] || [ "${CHILD_AFTER}" = "409" ]; then
+        ok "未確定のため子テーブル書込みは受け付けられる (HTTP ${CHILD_AFTER})"
+    else
+        ng "draftのrunへの子テーブル書込みが想定外の結果 (HTTP ${CHILD_AFTER})"
+    fi
 fi
 
 # 確定後、保存済み証跡のバイト列が変化していないこと
