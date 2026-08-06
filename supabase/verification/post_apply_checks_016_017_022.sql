@@ -83,8 +83,17 @@ BEGIN
         RAISE EXCEPTION '017 verify failed: EXECUTE still present -> %', v_bad;
     END IF;
 
-    IF NOT has_function_privilege('authenticated',
-            'public.finalize_run(uuid,text,text,uuid,boolean)', 'EXECUTE') THEN
+    -- 【2026-08-06修正】引数構成を直書きしていたため、migration 048で
+    -- finalize_run の引数が変わった時点で、本行が 42883（該当関数なし）で
+    -- 停止するようになっていた。停止位置が以降の検査より手前であるため、
+    -- get_my_agency_id の検査も実行されない状態だった。
+    -- 検査したいのは「authenticatedがEXECUTEを保持していること」であって
+    -- 特定の引数構成ではないため、名前からoidを解決する。
+    IF NOT EXISTS (
+        SELECT 1 FROM pg_proc p
+         WHERE p.pronamespace = 'public'::regnamespace
+           AND p.proname = 'finalize_run'
+           AND has_function_privilege('authenticated', p.oid, 'EXECUTE')) THEN
         RAISE EXCEPTION '017 verify failed: authenticated lost EXECUTE on finalize_run';
     END IF;
 
@@ -198,11 +207,21 @@ BEGIN
     IF has_column_privilege('authenticated','public.snapshot','unresolved_items','UPDATE') THEN
         RAISE EXCEPTION '024 self-check failed: authenticated still has UPDATE on snapshot.unresolved_items';
     END IF;
-    IF NOT has_column_privilege('authenticated','public.snapshot','redundancy_decisions','UPDATE') THEN
-        RAISE EXCEPTION '024 self-check failed: authenticated lost UPDATE on snapshot.redundancy_decisions';
+    -- 【2026-08-06修正・方針変更あり】
+    -- 024の時点では、redundancy_decisions・resolution_memo の2列だけは
+    -- authenticated の列単位UPDATEを残す方針だった。しかし034で、
+    -- この列単位付与には確定後凍結の検査が無く、確定済みrunへの直接PATCHが
+    -- 成立してしまうことが判明した。その後 032 の専用関数へ経路を一本化し、
+    -- 059（許可リスト方式）で列単位付与そのものを剥奪した。
+    -- したがって現在の正しい状態は「付与されていないこと」であり、
+    -- 024当時の期待値（付与されていること）とは逆になる。
+    -- 本ファイルを現状のまま実行すると、正しい状態に対して失敗を報告して
+    -- しまうため、現行方針に合わせて期待値を反転させる。
+    IF has_column_privilege('authenticated','public.snapshot','redundancy_decisions','UPDATE') THEN
+        RAISE EXCEPTION '024 self-check failed: authenticated still has direct UPDATE on snapshot.redundancy_decisions (must go through update_snapshot_redundancy_decisions)';
     END IF;
-    IF NOT has_column_privilege('authenticated','public.snapshot','resolution_memo','UPDATE') THEN
-        RAISE EXCEPTION '024 self-check failed: authenticated lost UPDATE on snapshot.resolution_memo';
+    IF has_column_privilege('authenticated','public.snapshot','resolution_memo','UPDATE') THEN
+        RAISE EXCEPTION '024 self-check failed: authenticated still has direct UPDATE on snapshot.resolution_memo (must go through update_snapshot_resolution_memo)';
     END IF;
 
     IF NOT has_function_privilege('authenticated','public.exclude_candidate(uuid,text,text)','EXECUTE') THEN

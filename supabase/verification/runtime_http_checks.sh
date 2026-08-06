@@ -158,6 +158,65 @@ expect_status "登録後にrunが変化した状態での確定は拒否" 400 \
 rm -f "${T2}"
 
 echo
+echo "── 8. 補償重複の判断記録（専任関数経由でのみ記録される） ────────────"
+# migration 061 の確認。
+# 判断の記録 redundancy_resolution_recorded は保護対象のevent_typeであり、
+# 画面からの直接INSERTはトリガーが必ず拒否する。記録は専任関数
+# update_snapshot_redundancy_decisions の内部でのみ行われる。
+# RUN_SUS は §2 の最後で draft に戻しているため、ここでは編集可能である。
+SNAP=$(curl -s "${SUPABASE_URL}/rest/v1/snapshot?run_id=eq.${RUN_SUS}&select=id" "${H[@]}" \
+       | sed -n 's/.*"id":"\([^"]*\)".*/\1/p')
+count_redundancy() {
+    curl -s "${SUPABASE_URL}/rest/v1/audit_event?run_id=eq.${RUN_SUS}&event_type=eq.redundancy_resolution_recorded&select=id" \
+         "${H[@]}" | grep -o '"id"' | wc -l | tr -d ' '
+}
+
+if [ -z "${SNAP}" ]; then
+    ng "補償重複の判断記録: snapshotを取得できなかった"
+else
+    expect_status "判断記録の直接INSERTは拒否" 400 \
+      "$(code -X POST "${SUPABASE_URL}/rest/v1/audit_event" "${H[@]}" \
+         -d "{\"run_id\":\"${RUN_SUS}\",\"event_type\":\"redundancy_resolution_recorded\",\"payload\":{}}")"
+
+    BEFORE=$(count_redundancy)
+    expect_status "専任関数での判断記録（項目つき）" 204 \
+      "$(code -X POST "${SUPABASE_URL}/rest/v1/rpc/update_snapshot_redundancy_decisions" "${H[@]}" \
+         -d "{\"p_snapshot_id\":\"${SNAP}\",\"p_redundancy_decisions\":[{\"item_key\":\"rt-item\",\"decision\":\"keep\",\"reason\":\"rt\"}],\"p_item_key\":\"rt-item\",\"p_decision\":\"keep\",\"p_reason\":\"rt\"}")"
+    AFTER=$(count_redundancy)
+    if [ "${AFTER}" -eq $((BEFORE + 1)) ]; then
+        ok "判断記録が1件増えた（${BEFORE} -> ${AFTER}）"
+    else
+        ng "判断記録が増えていない（${BEFORE} -> ${AFTER}）"
+    fi
+
+    # 項目を渡さない呼出し（判断の取消し）では証跡を残さない
+    BEFORE2=$(count_redundancy)
+    expect_status "項目を伴わない呼出しは成功する" 204 \
+      "$(code -X POST "${SUPABASE_URL}/rest/v1/rpc/update_snapshot_redundancy_decisions" "${H[@]}" \
+         -d "{\"p_snapshot_id\":\"${SNAP}\",\"p_redundancy_decisions\":[]}")"
+    AFTER2=$(count_redundancy)
+    if [ "${AFTER2}" -eq "${BEFORE2}" ]; then
+        ok "項目を伴わない呼出しでは判断記録が増えない（${BEFORE2} のまま）"
+    else
+        ng "項目を伴わない呼出しで判断記録が増えた（${BEFORE2} -> ${AFTER2}）"
+    fi
+
+    expect_status "不正な判断値は拒否" 400 \
+      "$(code -X POST "${SUPABASE_URL}/rest/v1/rpc/update_snapshot_redundancy_decisions" "${H[@]}" \
+         -d "{\"p_snapshot_id\":\"${SNAP}\",\"p_redundancy_decisions\":[],\"p_item_key\":\"rt-item\",\"p_decision\":\"bogus\"}")"
+
+    expect_status "判断値を伴わない項目指定は拒否" 400 \
+      "$(code -X POST "${SUPABASE_URL}/rest/v1/rpc/update_snapshot_redundancy_decisions" "${H[@]}" \
+         -d "{\"p_snapshot_id\":\"${SNAP}\",\"p_redundancy_decisions\":[],\"p_item_key\":\"rt-item\"}")"
+
+    # 未認証（anon）からは実行できない
+    expect_status "未認証からの専任関数呼出しは拒否" 401 \
+      "$(code -X POST "${SUPABASE_URL}/rest/v1/rpc/update_snapshot_redundancy_decisions" \
+         -H "apikey: ${SUPABASE_ANON_KEY}" -H "Content-Type: application/json" \
+         -d "{\"p_snapshot_id\":\"${SNAP}\",\"p_redundancy_decisions\":[]}")"
+fi
+
+echo
 echo "============================================================"
 echo "PASS: ${PASS} / FAIL: ${FAIL}"
 echo "検証後は supabase/verification/runtime_teardown.sql を実行してください。"

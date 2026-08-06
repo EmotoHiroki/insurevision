@@ -30,12 +30,27 @@ export async function POST(request: Request) {
             .from('run').select('*').eq('id', runId).single()
         if (runErr || !run) return Response.json({ error: 'run not found' }, { status: 404 })
 
-        const exceptionRoute = run.customer_decision !== 'compare'
-
         // G-21: allow 'draft' or 'post_record_pending' (post_record flow finalizes from post_record_pending)
         if (run.run_status !== 'draft' && run.run_status !== 'post_record_pending') {
             return Response.json({ error: 'already finalized' }, { status: 400 })
         }
+
+        // customer_decision は exceptionRoute の導出元であり、NULLだと
+        // `null !== 'compare'` が true になって「例外ルート」と解釈される。
+        // その結果、compare_presented_at と post_record の2つの検査が
+        // まるごとスキップされ、証跡登録とStorageアップロードという副作用を
+        // 実行したうえで、最後に finalize_run() 側で拒否されていた。
+        // DB側は許容値をホワイトリストで検査しているので、同じ基準を
+        // 副作用より前に適用する（NULLを最も緩い分岐へ倒さない）。
+        const VALID_DECISIONS = ['compare', 'renewal_no_change', 'information_refused', 'comparison_waived']
+        if (!run.customer_decision || !VALID_DECISIONS.includes(run.customer_decision)) {
+            return Response.json(
+                { error: '顧客の意向（customer_decision）が未設定または不正な値です' },
+                { status: 422 },
+            )
+        }
+
+        const exceptionRoute = run.customer_decision !== 'compare'
 
         const { data: snapshot } = await supabase
             .from('snapshot').select('*').eq('run_id', runId).maybeSingle()

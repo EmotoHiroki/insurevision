@@ -23,6 +23,9 @@
 -- ============================================================================
 
 DO $$
+DECLARE
+    v_redundancy_fn oid;
+    v_memo_fn       oid;
 BEGIN
     -- ── snapshot: authenticatedの直接UPDATE権限は元々なく（今回も付与しない）、
     --    2関数経由でのみ更新可能であること ──────────────────────────────
@@ -39,16 +42,36 @@ BEGIN
     END IF;
 
     -- ── 2関数: authenticatedのみEXECUTE可、anon・PUBLICは不可 ────────────
-    IF NOT has_function_privilege('authenticated', 'public.update_snapshot_redundancy_decisions(uuid, jsonb)', 'EXECUTE') THEN
+    -- 【2026-08-06修正】引数構成を直書きしていたため、migration 061で
+    -- 旧2引数版 update_snapshot_redundancy_decisions(uuid, jsonb) を削除した
+    -- 時点で、本DOブロックが 42883（該当関数なし）で停止するようになっていた。
+    -- しかも停止位置が以降の検査より手前であるため、resolution_memo側の検査も
+    -- 含めて1件も実行されない状態だった。
+    -- 引数構成は後続のmigrationで変わりうるので、名前からoidを解決する。
+    SELECT p.oid INTO v_redundancy_fn FROM pg_proc p
+     WHERE p.pronamespace = 'public'::regnamespace
+       AND p.proname = 'update_snapshot_redundancy_decisions';
+    IF v_redundancy_fn IS NULL THEN
+        RAISE EXCEPTION '032 verify failed: update_snapshot_redundancy_decisions not found';
+    END IF;
+
+    SELECT p.oid INTO v_memo_fn FROM pg_proc p
+     WHERE p.pronamespace = 'public'::regnamespace
+       AND p.proname = 'update_snapshot_resolution_memo';
+    IF v_memo_fn IS NULL THEN
+        RAISE EXCEPTION '032 verify failed: update_snapshot_resolution_memo not found';
+    END IF;
+
+    IF NOT has_function_privilege('authenticated', v_redundancy_fn, 'EXECUTE') THEN
         RAISE EXCEPTION '032 verify failed: authenticated cannot execute update_snapshot_redundancy_decisions';
     END IF;
-    IF has_function_privilege('anon', 'public.update_snapshot_redundancy_decisions(uuid, jsonb)', 'EXECUTE') THEN
+    IF has_function_privilege('anon', v_redundancy_fn, 'EXECUTE') THEN
         RAISE EXCEPTION '032 verify failed: anon can execute update_snapshot_redundancy_decisions';
     END IF;
-    IF NOT has_function_privilege('authenticated', 'public.update_snapshot_resolution_memo(uuid, text)', 'EXECUTE') THEN
+    IF NOT has_function_privilege('authenticated', v_memo_fn, 'EXECUTE') THEN
         RAISE EXCEPTION '032 verify failed: authenticated cannot execute update_snapshot_resolution_memo';
     END IF;
-    IF has_function_privilege('anon', 'public.update_snapshot_resolution_memo(uuid, text)', 'EXECUTE') THEN
+    IF has_function_privilege('anon', v_memo_fn, 'EXECUTE') THEN
         RAISE EXCEPTION '032 verify failed: anon can execute update_snapshot_resolution_memo';
     END IF;
 

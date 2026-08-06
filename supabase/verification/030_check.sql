@@ -16,6 +16,7 @@ DECLARE
     v_count      int;
     v_args       text;
     v_def        text;
+    v_fn         oid;
 BEGIN
     -- 旧シグネチャ（p_operator_id を含む5引数版）が存在しないこと
     SELECT count(*) INTO v_count
@@ -31,18 +32,29 @@ BEGIN
         RAISE EXCEPTION '030 verify failed: expected exactly 1 finalize_run overload, found %', v_count;
     END IF;
 
+    -- 【2026-08-06修正】030当時の引数構成を完全一致で検査していたため、
+    -- migration 048で同意3種を引数へ移した時点から、本行が常に失敗する
+    -- 状態になっていた（保護が弱まったわけではなく、期待値が古いだけ）。
+    -- 030で確認したかったのは「p_operator_idを引数から外したこと」であり、
+    -- それは上のチェックで担保されている。ここでは必須引数の存在のみを見る。
     SELECT pg_get_function_identity_arguments(oid) INTO v_args
       FROM pg_proc WHERE proname='finalize_run';
-    IF v_args <> 'p_run_id uuid, p_pdf_object_key text, p_pdf_sha256 text, p_consent_comparison_result boolean' THEN
+    IF v_args NOT LIKE 'p_run_id uuid, p_pdf_object_key text, p_pdf_sha256 text%' THEN
         RAISE EXCEPTION '030 verify failed: unexpected finalize_run signature -> %', v_args;
+    END IF;
+    IF v_args LIKE '%p_operator_id%' THEN
+        RAISE EXCEPTION '030 verify failed: finalize_run still takes p_operator_id -> %', v_args;
     END IF;
 
     -- EXECUTE権限: PUBLIC/anonなし、authenticatedのみ
-    IF has_function_privilege('public','public.finalize_run(uuid,text,text,boolean)','EXECUTE')
-    OR has_function_privilege('anon','public.finalize_run(uuid,text,text,boolean)','EXECUTE') THEN
+    -- 引数構成の変更に追随できるよう、名前からoidを解決する。
+    SELECT oid INTO v_fn FROM pg_proc
+     WHERE pronamespace = 'public'::regnamespace AND proname = 'finalize_run';
+    IF has_function_privilege('public', v_fn, 'EXECUTE')
+    OR has_function_privilege('anon', v_fn, 'EXECUTE') THEN
         RAISE EXCEPTION '030 verify failed: PUBLIC or anon still has EXECUTE on finalize_run';
     END IF;
-    IF NOT has_function_privilege('authenticated','public.finalize_run(uuid,text,text,boolean)','EXECUTE') THEN
+    IF NOT has_function_privilege('authenticated', v_fn, 'EXECUTE') THEN
         RAISE EXCEPTION '030 verify failed: authenticated lost EXECUTE on finalize_run (would break the app)';
     END IF;
 

@@ -82,12 +82,22 @@ function validateFinalizeRequest(
     const { run, snapshot } = input
     const insurerListPresented = input.insurerListPresented ?? true
 
-    // route.ts と同じく customer_decision から導出する（クライアント値は信用しない）
-    const exceptionRoute = run.customer_decision !== 'compare'
-
     if (run.run_status !== 'draft' && run.run_status !== 'post_record_pending') {
         return { ok: false, status: 400, error: 'already finalized' }
     }
+
+    // customer_decision は exceptionRoute の導出元であり、未設定（NULL）だと
+    // `null !== 'compare'` が true になって「例外ルート」と解釈される。
+    // その結果、compare_presented_at と事後記録の2つの検査がまるごとスキップされ、
+    // 証跡登録とStorageアップロードという副作用を実行したうえで、
+    // 最後にDB側で拒否されていた。許可値の検査を副作用より前に置く。
+    const VALID_DECISIONS = ['compare', 'renewal_no_change', 'information_refused', 'comparison_waived']
+    if (!run.customer_decision || !VALID_DECISIONS.includes(run.customer_decision)) {
+        return { ok: false, status: 422, error: '顧客の意向（customer_decision）が未設定または不正な値です' }
+    }
+
+    // route.ts と同じく customer_decision から導出する（クライアント値は信用しない）
+    const exceptionRoute = run.customer_decision !== 'compare'
 
     // Fail-Closed: snapshot は存在必須（不存在を合格扱いにしない）
     if (!snapshot) {
@@ -615,6 +625,72 @@ describe('確定ゲートの否定系（現行仕様）', () => {
         })
         expect(r.ok).toBe(false)
         expect(r.error).toBe('compare_presented_at not set')
+    })
+
+    // ── customer_decision の3状態（未設定・不正値・正常値） ────────────────
+    // 未設定のとき `null !== 'compare'` が true となり、例外ルートとして
+    // 扱われて compare_presented_at と事後記録の検査がスキップされていた。
+    // さらに、その状態で証跡登録とStorageアップロードまで実行してから
+    // DB側で拒否される構造だったため、副作用より前に拒否することを検証する。
+    it('customer_decisionが未設定なら、例外ルートへ倒さず副作用の前に拒否する', () => {
+        const r = validateFinalizeRequest({
+            run: { ...FINALIZE_OK_RUN, customer_decision: null, compare_presented_at: null },
+            snapshot: { unresolved_items: [] },
+        })
+        expect(r.ok).toBe(false)
+        expect(r.status).toBe(422)
+        expect(r.error).toBe('顧客の意向（customer_decision）が未設定または不正な値です')
+    })
+
+    it('customer_decisionが許可値以外なら拒否する', () => {
+        const r = validateFinalizeRequest({
+            run: { ...FINALIZE_OK_RUN, customer_decision: 'not_a_real_decision' },
+            snapshot: { unresolved_items: [] },
+        })
+        expect(r.ok).toBe(false)
+        expect(r.status).toBe(422)
+        expect(r.error).toBe('顧客の意向（customer_decision）が未設定または不正な値です')
+    })
+
+    it('DBのCHECK制約が許す4値はいずれも通過する', () => {
+        // 許可リストがDB側の CHECK 制約より狭いと、正当な案件を確定できなくなる。
+        // 本番の制約は compare / renewal_no_change / information_refused /
+        // comparison_waived の4値。
+        for (const decision of ['compare', 'renewal_no_change', 'information_refused', 'comparison_waived']) {
+            const r = validateFinalizeRequest({
+                run: {
+                    ...FINALIZE_OK_RUN,
+                    customer_decision: decision,
+                    // 例外ルートでは比較提示日時を要求しない
+                    compare_presented_at: decision === 'compare' ? '2026-01-01T00:00:00Z' : null,
+                },
+                snapshot: { unresolved_items: [] },
+            })
+            expect(r.ok, `${decision} が拒否された`).toBe(true)
+        }
+    })
+
+    it('customer_decisionの検査を追加してもsnapshot不存在の拒否は失われない', () => {
+        // 新しい検査が、既存の Fail-Closed 検査を覆い隠していないことを確認する。
+        // customer_decision が正常な場合は、これまでどおり snapshot 不存在で拒否される。
+        const r = validateFinalizeRequest({
+            run: { ...FINALIZE_OK_RUN, customer_decision: 'compare' },
+            snapshot: null,
+        })
+        expect(r.ok).toBe(false)
+        expect(r.status).toBe(422)
+        expect(r.error).toBe('snapshot not found')
+    })
+
+    it('customer_decisionもsnapshotも欠けている場合、いずれにせよ副作用の前に拒否される', () => {
+        // どちらの検査が先に鳴るかは実装順に依存するが、
+        // 重要なのは証跡登録・アップロードへ進まないことである。
+        const r = validateFinalizeRequest({
+            run: { ...FINALIZE_OK_RUN, customer_decision: null },
+            snapshot: null,
+        })
+        expect(r.ok).toBe(false)
+        expect(r.status).toBe(422)
     })
 })
 

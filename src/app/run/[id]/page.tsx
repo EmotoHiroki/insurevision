@@ -390,36 +390,52 @@ export default function RunDetailPage() {
     const handleSaveRedundancyDecision = async (
         itemKey: string, decision: 'keep' | 'remove', reason: string
     ) => {
-        if (!operator || !snapshot) return
+        if (!operator || !snapshot) return false
         setSavingRedundancy(true)
         const updated = redundancyDecisions.filter(d => d.item_key !== itemKey)
         updated.push({ item_key: itemKey, decision, reason })
         const supabase = createClient()
-        // b1-MS1 #40横展開: snapshotの直接updateは権限剥奪により失敗するため、
-        // agency照合・確定後凍結を行うRPC経由に変更（migration 032）。
-        await supabase.rpc('update_snapshot_redundancy_decisions', {
-            p_snapshot_id: snapshot.id,
-            p_redundancy_decisions: updated,
-        })
-        await supabase.from('audit_event').insert({
-            run_id: runId,
-            event_type: 'redundancy_resolution_recorded' as const,
-            operator_id: operator.id,
-            payload: { item_key: itemKey, decision, reason },
-        })
-        setRedundancyDecisions(updated)
-        setSavingRedundancy(false)
-        showToast(locale === 'ja' ? '判断を保存しました' : 'Decision saved')
+        try {
+            // b1-MS1 #40横展開: snapshotの直接updateは権限剥奪により失敗するため、
+            // agency照合・確定後凍結を行うRPC経由に変更（migration 032）。
+            //
+            // 証跡（redundancy_resolution_recorded）もこのRPCの内部で記録する
+            // （migration 061）。従来はここから audit_event へ直接INSERTしていたが、
+            // 保護対象のevent_typeであるためトリガーに必ず拒否されており、
+            // かつ戻り値を確認していなかったため「保存しました」と表示しつつ
+            // 実際には記録されていなかった。
+            const { error: rpcErr } = await supabase.rpc('update_snapshot_redundancy_decisions', {
+                p_snapshot_id: snapshot.id,
+                p_redundancy_decisions: updated,
+                p_item_key: itemKey,
+                p_decision: decision,
+                p_reason: reason,
+            })
+            if (rpcErr) throw rpcErr
+            setRedundancyDecisions(updated)
+            showToast(locale === 'ja' ? '判断を保存しました' : 'Decision saved')
+            return true
+        } catch (e: unknown) {
+            showToast(e instanceof Error ? e.message : 'Error', 'error')
+            return false
+        } finally {
+            setSavingRedundancy(false)
+        }
     }
 
     const handleRemoveRedundancyItem = async (itemKey: string) => {
         if (!snapshot) return
         const updated = redundancyDecisions.filter(d => d.item_key !== itemKey)
         const supabase = createClient()
-        await supabase.rpc('update_snapshot_redundancy_decisions', {
+        // 判断の取消しは「判断の記録」ではないため、証跡用の引数は渡さない。
+        const { error: rpcErr } = await supabase.rpc('update_snapshot_redundancy_decisions', {
             p_snapshot_id: snapshot.id,
             p_redundancy_decisions: updated,
         })
+        if (rpcErr) {
+            showToast(rpcErr.message, 'error')
+            return
+        }
         setRedundancyDecisions(updated)
     }
 
@@ -1714,10 +1730,13 @@ export default function RunDetailPage() {
                                             style={{ flex: 1 }} />
                                         <button className="btn-secondary" style={{ fontSize: 13 }}
                                             disabled={!newRedundancyItem.trim() || savingRedundancy}
-                                            onClick={() => {
+                                            onClick={async () => {
                                                 if (!newRedundancyItem.trim()) return
-                                                handleSaveRedundancyDecision(newRedundancyItem.trim(), 'keep', '')
-                                                setNewRedundancyItem('')
+                                                // 保存の成否を待たずに入力欄を消すと、
+                                                // 失敗時に入力内容だけが失われて再試行できなくなる。
+                                                const saved = await handleSaveRedundancyDecision(
+                                                    newRedundancyItem.trim(), 'keep', '')
+                                                if (saved) setNewRedundancyItem('')
                                             }}>
                                             {locale === 'ja' ? '追加' : 'Add'}
                                         </button>

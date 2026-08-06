@@ -1,0 +1,75 @@
+#!/usr/bin/env bash
+# ============================================================================
+# run_all_checks.sh
+#
+# supabase/verification/ 配下の検証SQL（読み取り専用）をまとめて実行し、
+# ファイルごとに成功・失敗を報告する。1件でも失敗したら終了コード1を返す。
+#
+# 【なぜ必要か】
+#   検証SQLは、それぞれのmigrationを適用した時点で作成している。
+#   その後のmigrationで関数の引数構成や権限方針が変わると、
+#   保護がむしろ強くなっている場合でも、古い期待値のまま残った検査は
+#   失敗するようになる。個別に実行していると、この陳腐化に気づけない。
+#
+#   実際、2026-08-06の再点検で、028・030・032・post_apply の4ファイルが
+#   陳腐化して失敗する状態になっていることが判明した。
+#   （028は「保護が無い」と報告していたが、実際には拒否リスト方式から
+#     許可リスト方式へ強化されていた。すなわち誤検知である）
+#   以後、migrationを追加したら必ず本スクリプトで全件を通すこと。
+#
+# 実行方法:
+#   ./run_all_checks.sh "<接続文字列>"
+#   例: ./run_all_checks.sh "postgresql://postgres:PASS@db.xxxx.supabase.co:5432/postgres"
+#
+# 実行するのは読み取り専用の検査SQLのみで、台帳登録用SQL
+# （*_ledger_registration.sql・*_ledger_fulltext_correction.sql）は
+# 書き込みを伴うため対象外とする。
+# ============================================================================
+set -u
+
+CONN="${1:-}"
+if [ -z "${CONN}" ]; then
+    echo "使い方: $0 \"<接続文字列>\"" >&2
+    exit 2
+fi
+
+DIR="$(cd "$(dirname "$0")" && pwd)"
+PASS=0
+FAIL=0
+FAILED_FILES=""
+
+echo "============================================================"
+echo "検証SQL一括実行"
+echo "============================================================"
+
+for f in "${DIR}"/*_check*.sql "${DIR}"/post_apply_checks_*.sql; do
+    [ -e "${f}" ] || continue
+    b="$(basename "${f}")"
+    case "${b}" in
+        *ledger*) continue ;;
+    esac
+
+    # ON_ERROR_STOP=1 で、RAISE EXCEPTION を確実に終了コードへ反映させる
+    out="$(psql "${CONN}" -v ON_ERROR_STOP=1 -X -q -f "${f}" 2>&1)"
+    if [ $? -eq 0 ]; then
+        echo "  [PASS] ${b}"
+        PASS=$((PASS + 1))
+    else
+        echo "  [FAIL] ${b}"
+        echo "${out}" | grep -E "ERROR|FATAL" | head -3 | sed 's/^/         /'
+        FAIL=$((FAIL + 1))
+        FAILED_FILES="${FAILED_FILES} ${b}"
+    fi
+done
+
+echo "============================================================"
+echo "PASS: ${PASS} / FAIL: ${FAIL}"
+if [ "${FAIL}" -ne 0 ]; then
+    echo "失敗したファイル:${FAILED_FILES}"
+    echo ""
+    echo "失敗が「保護が失われた」ことを示すのか、"
+    echo "「期待値が古くなった」ことを示すのかを必ず切り分けること。"
+    echo "後者の場合は、現行の実装を正として期待値の側を是正する。"
+    exit 1
+fi
+echo "すべての検証SQLが成功しました。"

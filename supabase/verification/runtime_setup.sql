@@ -35,6 +35,33 @@ BEGIN
 END;
 $$;
 
+-- ── 前回の検証データを先に片付ける ──────────────────────────────────────
+-- 【なぜ必要か】
+--   runtime_http_checks.sh は検証の過程で RT-01 と RT-03 を確定させる。
+--   確定済みのrunは `enforce_run_finalize_lockdown` により
+--   「確定状態から他の状態へ戻すUPDATE」が全ロールで拒否されるため、
+--   下の INSERT ... ON CONFLICT DO UPDATE で run_status を 'draft' に
+--   戻そうとすると、本スクリプト自体が次のエラーで失敗していた。
+--     run: cannot transition out of finalized state (run ...)
+--   その結果、後始末をせずに検証を2回続けて実行すると、
+--   セットアップが失敗しているにもかかわらず古いデータが残ったまま
+--   検証が走り、保留系・証跡系の判定が誤って失敗する状態になっていた。
+--
+--   UPDATEで状態を戻すのではなく、使い捨てデータを削除してから
+--   作り直すことで、直前の状態にかかわらず常に同じ初期状態から始める。
+--   これにより、後始末を忘れたまま再実行しても結果が変わらない。
+DELETE FROM public.run_proof
+ WHERE run_id IN (SELECT id FROM public.run WHERE customer_ref LIKE 'RT-0%');
+DELETE FROM public.audit_event
+ WHERE run_id IN (SELECT id FROM public.run WHERE customer_ref LIKE 'RT-0%');
+DELETE FROM public.intent_confirmation
+ WHERE run_id IN (SELECT id FROM public.run WHERE customer_ref LIKE 'RT-0%');
+DELETE FROM public.snapshot
+ WHERE run_id IN (SELECT id FROM public.run WHERE customer_ref LIKE 'RT-0%');
+DELETE FROM public.candidate
+ WHERE run_id IN (SELECT id FROM public.run WHERE customer_ref LIKE 'RT-0%');
+DELETE FROM public.run WHERE customer_ref LIKE 'RT-0%';
+
 INSERT INTO public.agency_config (id, agency_id, agency_name)
 VALUES ('00000000-0000-0000-0000-0000000000a1',
         '00000000-0000-0000-0000-0000000000a1', '検証用代理店')

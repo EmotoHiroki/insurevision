@@ -267,12 +267,12 @@ export default function NewRunPage() {
                 const res = await fetch('/api/finalize', {
                     method: 'POST',
                     headers: { 'Content-Type': 'application/json' },
-                    body: JSON.stringify({
-                        runId,
-                        operatorId: op.id,
-                        consentFlags,
-                        exceptionRoute: true,
-                    }),
+                    // 確定者は finalize_run() が auth.uid() から導出し、
+                    // 例外ルートかどうかはサーバ側が run.customer_decision から
+                    // 導出する。いずれもクライアントの申告を信用しないため、
+                    // operatorId と exceptionRoute は送らない
+                    // （送っても無視されるが、APIの契約と一致させる）。
+                    body: JSON.stringify({ runId, consentFlags }),
                 })
                 if (!res.ok) {
                     const body = await res.json()
