@@ -31,7 +31,7 @@ BEGIN
     RAISE NOTICE '027 verify passed: no table grants TRIGGER to anon/authenticated';
 END $$;
 
--- ── 全8権限の横展開スイープ（事故Wの再発防止。田島様2026-07-30ご指摘C-12）──
+-- ── 全8権限の横展開スイープ（同型の見落としの再発防止。田島様2026-07-30ご指摘C-12）──
 -- SELECT/INSERT/UPDATEを除く5権限（DELETE・TRUNCATE・REFERENCES・TRIGGER・
 -- MAINTAIN）はいずれもRLSの行単位制御の対象外であり、anon/authenticatedに
 -- 残す理由がない。5権限すべてが0件であることを確認する。

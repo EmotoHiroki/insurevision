@@ -32,6 +32,9 @@ yarn-error.log*
 
 # env files (can opt-in for committing if needed)
 .env*
+# 納品zipに同梱するため、プレースホルダのみの .env.example は追跡する
+# （README の設定手順が `cp .env.example .env.local` を案内しているため）
+!.env.example
 
 # vercel
 .vercel
