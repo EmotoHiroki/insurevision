@@ -1,0 +1,18 @@
+# Vercelへアップロードしないもの。
+#
+# .claude/worktrees/ には、並行作業用に作られたリポジトリの複製が入ることがある。
+# その中には docs-unified 配下の .docx / .zip がそのまま含まれるため、
+# アップロードされると Tailwind のコンテンツ走査がバイナリを読み、
+# `CssSyntaxError: Invalid code point` でビルドが失敗する。
+# globals.css の `@source not` はリポジトリ直下の docs-unified しか除外しないため、
+# 複製側は対象外になる。ここで確実に除外する。
+.claude/
+.codex/
+
+# 資料・納品zip。アプリのビルドには不要で、バイナリを多数含む。
+docs-unified/
+
+# ローカル生成物
+.next/
+node_modules/
+supabase/.temp/
