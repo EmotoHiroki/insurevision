@@ -11,13 +11,30 @@
 #   使い捨てデータに対してのみ実行すること。
 #
 # 事前準備:
-#   1) 検証用プロジェクトへ migration 001〜058 を適用しておく
-#   2) supabase/verification/runtime_setup.sql を実行しておく
+#   1) 検証用プロジェクトへ migration 001〜064 を適用しておく
+#      （同梱の migrations/ を番号順に全件適用する。手順は
+#        migrations/REPLAY_ORDER.md を参照）
+#   2) Edge Function `verify-proof` を同じプロジェクトへ配置しておく
+#      （同梱の supabase/functions/verify-proof/index.ts。
+#        migration 064 以降、確定にはStorage上の実ファイルから算出した
+#        SHA-256による検証が必須であり、この関数が無いと §3 以降の
+#        確定を伴う検査がすべて失敗する）
+#      配置例:
+#        supabase functions deploy verify-proof --project-ref <project-ref>
+#      本関数は SUPABASE_URL・SUPABASE_SERVICE_ROLE_KEY・SUPABASE_ANON_KEY を
+#      環境変数から読む。Supabase上では既定で設定されるため追加設定は不要。
+#   3) supabase/verification/runtime_setup.sql を実行しておく
 #
 # 実行方法:
 #   export SUPABASE_URL="https://<project-ref>.supabase.co"
 #   export SUPABASE_ANON_KEY="<anon key>"
 #   bash supabase/verification/runtime_http_checks.sh
+#
+# 判定件数について:
+#   本スクリプトの判定は全42項目で固定である。
+#   §10（並行実行）は競合の勝敗がタイミングに依存するが、
+#   どちらの結果でも同数を判定する構成にしているため、
+#   実行のたびに合計件数が変動することはない。
 #
 # 後始末:
 #   supabase/verification/runtime_teardown.sql を実行する

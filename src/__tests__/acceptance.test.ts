@@ -50,8 +50,11 @@ import { t } from '@/lib/i18n'
 // （save_run_proof / build_run_proof_payload）へ移した。アプリ側の
 // buildMinimalProofStub は廃止済みのため、それを模倣していたローカル関数と
 // 対応するテストも削除した。証跡本文の内容は、DB側の検証SQL
-// （supabase/verification/058_proof_and_suspended_check.sql）および
-// 実HTTPスクリプトで検証する。
+// （supabase/verification/050_058_check.sql）および
+// 実HTTPスクリプト（supabase/verification/runtime_http_checks.sh）で検証する。
+// 【2026-08-07修正】上記のSQLファイル名を
+// `058_proof_and_suspended_check.sql` と誤記しており、
+// 同名のファイルは存在しなかった。実在する名前へ訂正した。
 
 /** Mirrors the finalize pre-checks in src/app/api/finalize/route.ts
  *  （2026-08-06更新: 現行実装に追随。snapshot不存在の拒否、meeting_scene・

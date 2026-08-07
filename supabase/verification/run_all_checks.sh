@@ -42,12 +42,22 @@ echo "============================================================"
 echo "検証SQL一括実行"
 echo "============================================================"
 
-for f in "${DIR}"/*_check*.sql "${DIR}"/post_apply_checks_*.sql; do
+# 対象ファイルの列挙。
+# `post_apply_checks_*.sql` は `*_check*.sql` にも一致するため、
+# 2つのパターンを並べると同じファイルを2回実行してしまう。
+# 実際、post_apply_checks_016_017_022.sql が重複していた。
+# 1つのパターンで拾い、重複を排除してから実行する。
+SEEN=""
+for f in "${DIR}"/*_check*.sql; do
     [ -e "${f}" ] || continue
     b="$(basename "${f}")"
     case "${b}" in
         *ledger*) continue ;;
     esac
+    case " ${SEEN} " in
+        *" ${b} "*) continue ;;
+    esac
+    SEEN="${SEEN} ${b}"
 
     # ON_ERROR_STOP=1 で、RAISE EXCEPTION を確実に終了コードへ反映させる
     out="$(psql "${CONN}" -v ON_ERROR_STOP=1 -X -q -f "${f}" 2>&1)"
