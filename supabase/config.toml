@@ -1,0 +1,37 @@
+# ============================================================================
+# supabase/config.toml
+#
+# 田島様2026-08-08ご指摘7への対応。
+#   「verify-proof の認証設定（verify_jwt）を config.toml 等でバージョン管理下に置き、
+#     認証なし・不正JWT・正規JWTの3通りの動作確認結果をご提出ください」
+#
+# 本ファイルは Edge Function の認証設定をリポジトリ上で明示し、
+# 配置時の設定が人手の操作に依存しないようにするためのものです。
+#
+# 【なぜ必要か】
+#   本番に配置されていた seed-user Edge Function は verify_jwt = false（認証不要）
+#   の状態で残っており、この設定がどこにも記録されていませんでした。
+#   設定がコード管理下に無いと、配置のたびに人手の操作へ依存し、
+#   本件のような状態を検出できません。
+#   （seed-user は田島様のご承認のもと2026-08-08に削除済みです）
+#
+# 【デプロイ時の反映方法】
+#   supabase functions deploy verify-proof --project-ref <project-ref>
+#   Supabase CLI は本ファイルの [functions.<name>] を参照し、
+#   verify_jwt の設定を反映します。
+#   CLI を用いずダッシュボードから配置する場合は、
+#   配置後に verify_jwt が true であることを必ず確認してください。
+# ============================================================================
+
+project_id = "insurevision"
+
+[functions.verify-proof]
+# 認証必須。Storage 上の実ファイルから SHA-256 を再計算し、その結果を
+# run_proof へ記録する処理であり、呼出し元は認証済み利用者に限る。
+#
+# なお本関数は verify_jwt による認証に加えて、関数内部でも次の多層の防御を持つ:
+#   - 呼出し元のJWTで run の参照可否をRLS経由で確認する
+#   - 検証結果の記録は service_role 専用のDB関数経由でのみ行う
+#     （record_verified_proof_hash / get_proof_object_version は
+#       SECURITY INVOKER で current_user を検査し、service_role 以外を拒否する）
+verify_jwt = true
