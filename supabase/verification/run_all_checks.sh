@@ -21,7 +21,12 @@
 #   ./run_all_checks.sh "<接続文字列>"
 #   例: ./run_all_checks.sh "postgresql://postgres:PASS@db.xxxx.supabase.co:5432/postgres"
 #
-# 実行するのは読み取り専用の検査SQLのみで、台帳登録用SQL
+# 本スクリプトが実行するのは読み取り専用の検査SQLのみである。
+# 実オブジェクトを CREATE / DROP する試験（029_object_creation_check.sql）は
+# 本番で実行してはならないため、本スクリプトの対象から除外している
+# （田島様2026-08-08ご指摘2）。当該試験は分離検証環境で個別に実行すること。
+#
+# 台帳登録用SQL
 # （*_ledger_registration.sql・*_ledger_fulltext_correction.sql）は
 # 書き込みを伴うため対象外とする。
 # ============================================================================
@@ -36,6 +41,7 @@ fi
 DIR="$(cd "$(dirname "$0")" && pwd)"
 PASS=0
 FAIL=0
+SKIPPED=0
 FAILED_FILES=""
 
 echo "============================================================"
@@ -53,6 +59,14 @@ for f in "${DIR}"/*_check*.sql; do
     b="$(basename "${f}")"
     case "${b}" in
         *ledger*) continue ;;
+        # 実オブジェクトを CREATE / DROP する試験は本番では実行しない。
+        # 田島様2026-08-08ご指摘2により、本スクリプトが実行するのは
+        # 読み取り専用の検査のみとする。当該試験は分離検証環境で
+        # 個別に実行すること（029_object_creation_check.sql）。
+        029_object_creation_check.sql)
+            echo "  [SKIP] ${b}（実オブジェクト作成試験。分離検証環境で個別に実行）"
+            SKIPPED=$((SKIPPED + 1))
+            continue ;;
     esac
     case " ${SEEN} " in
         *" ${b} "*) continue ;;
@@ -73,7 +87,7 @@ for f in "${DIR}"/*_check*.sql; do
 done
 
 echo "============================================================"
-echo "PASS: ${PASS} / FAIL: ${FAIL}"
+echo "PASS: ${PASS} / FAIL: ${FAIL} / SKIP: ${SKIPPED}（本番非対象の実オブジェクト作成試験）"
 if [ "${FAIL}" -ne 0 ]; then
     echo "失敗したファイル:${FAILED_FILES}"
     echo ""
