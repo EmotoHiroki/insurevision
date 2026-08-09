@@ -11,13 +11,13 @@
 
 `supabase/migrations/`配下の`*.sql`を、ファイル名の昇順でそのまま
 最後まで適用する。除外するファイルはない（018は存在しない番号として
-欠番になる）。本書が適用結果まで実機で確認済みの範囲は001〜067
-（001〜017・019〜067の66ファイル）である。これより新しい番号の
+欠番になる）。本書が適用結果まで実機で確認済みの範囲は001〜068
+（001〜017・019〜068の67ファイル）である。これより新しい番号の
 ファイルがディレクトリに存在する場合は、それらも同じ規則で
 番号順に適用する。
 
 ```
-001, 002, ..., 017, 019, 020, ..., 066, 067
+001, 002, ..., 017, 019, 020, ..., 067, 068
 ```
 
 > **権限を含む再現性について（2026-08-07更新）**: 従来、`anon`・`authenticated`
@@ -331,6 +331,32 @@ migration 060 および該当関数の再適用で解消した（経緯は完了
 本スクリプトはrunを実際に確定させ、拒否されるべき書込みを実際に試行する破壊的な検査であり、
 田島様2026-08-04ご指示のとおり、分離した検証環境の使い捨てデータに対してのみ実行している。
 本番に対しては実行していない。
+
+**検証状況その7（2026-08-09・migration 068の追加）**:
+
+068は、田島様2026-08-08ご指摘4（遷移表と実装の不一致）への対応として追加した。
+`run_status` の遷移を許可リスト化し、`draft`・`post_record_pending` から
+`archived` への直接変更を拒否する。あわせて `suspended` へ入る際に
+`suspension_type` と `suspended_at` の記録を必須とした。
+
+検証用プロジェクトへ先行適用し、肯定・否定あわせて7件を実測したうえで本番へ適用した。
+`authenticated` の直接UPDATEはRLSにより対象行が0行となり検査が空振りしうるため、
+対象行が実際に更新可能であることを確認したうえで実施している。
+
+```
+[sanity] row updatable as authenticated (rows=1)
+[OK] draft->archived rejected
+[OK] draft->suspended w/o fields rejected
+[OK] draft->suspended with fields allowed
+[OK] suspended->draft resume allowed
+[OK] draft->post_record_pending allowed
+[OK] post_record_pending->archived rejected
+[OK] post_record_pending->suspended allowed
+```
+
+068は定義比較の対象（関数本文）に含まれ、適用後も本番・検証DBの
+12分類・579件は差分0件である。台帳へは version `20260809090000` として
+両プロジェクトに登録済み。
 
 ## 018を欠番とした経緯（履歴）
 
