@@ -71,7 +71,13 @@ BEGIN
             'confirm_smartphone','get_smartphone_confirm_status',
             'issue_smartphone_confirm_token','record_smartphone_manual_confirmation',
             -- 証跡（056・057・058）
-            'save_run_proof','build_run_proof_payload','enforce_proof_object_immutable'
+            'save_run_proof','build_run_proof_payload','enforce_proof_object_immutable',
+            -- 保留・再開の監査記録（071）
+            --   トリガー専用関数。所有者権限で audit_event へ記録するため
+            --   SECURITY DEFINER としている。operator_id は引数で受け取らず
+            --   auth.uid() から導出する。EXECUTE は PUBLIC・anon・authenticated・
+            --   service_role のいずれからも剥奪済み（071・072）。
+            'record_run_suspension_audit'
        );
     IF v_others IS NOT NULL THEN
         RAISE EXCEPTION '028 sweep: unexpected additional SECURITY DEFINER functions found, review needed -> %', v_others;
