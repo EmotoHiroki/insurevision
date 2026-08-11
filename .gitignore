@@ -50,3 +50,6 @@ __pycache__/
 # agent worktrees (transient, never commit)
 .claude/worktrees/
 supabase/.temp/
+
+# 開発者用の英語メモ（納品対象外）
+PROJECT_NOTES_EN.md
