@@ -6,6 +6,7 @@ import { createClient } from '@/lib/supabase/client'
 import { useLocale } from '@/lib/locale-context'
 import type { Run, Candidate, Operator, AuditEvent, Snapshot, CoverageStatus, ExclusionReasonCode, MeetingScene, RecordingMode } from '@/lib/types'
 import { t as i18nT } from '@/lib/i18n'
+import { validateSuspendInput, interpretUpdateResult, canResume } from '@/lib/insurance/suspension'
 import { format } from 'date-fns'
 import {
     LuShield, LuGlobe, LuArrowLeft, LuCheck, LuPlus, LuTrash2,
@@ -135,6 +136,7 @@ export default function RunDetailPage() {
     const [suspensionType, setSuspensionType] = useState<'condition_adjustment' | 'mid_session'>('condition_adjustment')
     const [pendingNote, setPendingNote] = useState('')
     const [suspending, setSuspending] = useState(false)
+    const [resuming, setResuming] = useState(false)
     // G-21: post-record phase completion state
     const [completingPhase1, setCompletingPhase1] = useState(false)
     const [completingPhase2, setCompletingPhase2] = useState(false)
@@ -440,32 +442,78 @@ export default function RunDetailPage() {
     }
 
     // Suspension
+    // 田島様2026-08-10ご指摘②③: 保留3項目をすべて必須とし、DB更新の error に加えて
+    // 更新0件（競合・RLS不一致・対象行なし）も成功扱いしない。
+    // 保留は draft からのみ可能（2026-08-11ご判断。migration 070でDB側も不許可）。
     const handleSuspend = async () => {
-        if (!operator) return
+        if (!operator || !run) return
+        const check = validateSuspendInput({
+            runStatus: run.run_status,
+            suspensionType,
+            pendingNote,
+        })
+        if (!check.ok) {
+            showToast(check.reason === 'note_required'
+                ? (locale === 'ja' ? '保留メモを入力してください' : 'A suspension note is required')
+                : (locale === 'ja' ? 'この状態では保留にできません' : 'This run cannot be suspended'), 'error')
+            return
+        }
         setSuspending(true)
-        const supabase = createClient()
-        await supabase.from('run').update({
-            run_status: 'suspended',
-            suspension_type: suspensionType,
-            pending_note: pendingNote.trim() || null,
-            suspended_at: new Date().toISOString(),
-        }).eq('id', runId)
-        setSuspending(false)
-        setShowSuspendForm(false)
-        showToast(locale === 'ja' ? '案件を保留にしました' : 'Run suspended')
-        await loadData()
+        try {
+            const supabase = createClient()
+            const { data, error } = await supabase.from('run').update({
+                run_status: 'suspended',
+                suspension_type: suspensionType,
+                pending_note: pendingNote.trim(),
+                suspended_at: new Date().toISOString(),
+            }).eq('id', runId).eq('run_status', 'draft').select('id')
+            const outcome = interpretUpdateResult({ error, affectedRows: data?.length })
+            if (!outcome.ok) {
+                throw new Error(outcome.reason === 'error' && error
+                    ? error.message
+                    : (locale === 'ja'
+                        ? '保留にできませんでした。案件の状態が変わっている可能性があります。画面を更新して再度お試しください。'
+                        : 'Could not suspend. The run state may have changed. Reload and try again.'))
+            }
+            setShowSuspendForm(false)
+            setPendingNote('')
+            showToast(locale === 'ja' ? '案件を保留にしました' : 'Run suspended')
+            await loadData()
+        } catch (e: unknown) {
+            showToast(e instanceof Error ? e.message : 'Error', 'error')
+            await loadData()
+        } finally {
+            setSuspending(false)
+        }
     }
 
     const handleResume = async () => {
-        const supabase = createClient()
-        await supabase.from('run').update({
-            run_status: 'draft',
-            suspension_type: null,
-            pending_note: null,
-            suspended_at: null,
-        }).eq('id', runId)
-        showToast(locale === 'ja' ? '案件を再開しました' : 'Run resumed')
-        await loadData()
+        if (!run || !canResume(run.run_status)) return
+        setResuming(true)
+        try {
+            const supabase = createClient()
+            const { data, error } = await supabase.from('run').update({
+                run_status: 'draft',
+                suspension_type: null,
+                pending_note: null,
+                suspended_at: null,
+            }).eq('id', runId).eq('run_status', 'suspended').select('id')
+            const outcome = interpretUpdateResult({ error, affectedRows: data?.length })
+            if (!outcome.ok) {
+                throw new Error(outcome.reason === 'error' && error
+                    ? error.message
+                    : (locale === 'ja'
+                        ? '再開できませんでした。案件の状態が変わっている可能性があります。画面を更新して再度お試しください。'
+                        : 'Could not resume. The run state may have changed. Reload and try again.'))
+            }
+            showToast(locale === 'ja' ? '案件を再開しました' : 'Run resumed')
+            await loadData()
+        } catch (e: unknown) {
+            showToast(e instanceof Error ? e.message : 'Error', 'error')
+            await loadData()
+        } finally {
+            setResuming(false)
+        }
     }
 
     // ─────────────────────────────────────────────
@@ -1272,15 +1320,17 @@ export default function RunDetailPage() {
                                         {run.pending_note && <p style={{ fontSize: 13, color: '#92400e' }}>{run.pending_note}</p>}
                                         {run.suspended_at && <p style={{ fontSize: 12, color: '#b45309' }}>{new Date(run.suspended_at).toLocaleString()}</p>}
                                     </div>
-                                    <button className="btn-primary" onClick={handleResume} style={{ fontSize: 13 }}>
-                                        {locale === 'ja' ? '保留を解除して再開' : 'Resume'}
+                                    <button className="btn-primary" onClick={handleResume} disabled={resuming} style={{ fontSize: 13 }}>
+                                        {resuming ? '...' : (locale === 'ja' ? '保留を解除して再開' : 'Resume')}
                                     </button>
                                 </div>
                             </div>
                         )}
 
-                        {/* Suspend button */}
-                        {isEditable && (
+                        {/* Suspend button
+                            田島様2026-08-11ご判断: 保留は draft からのみ。
+                            post_record_pending では表示しない（migration 070でDB側も不許可）。 */}
+                        {run.run_status === 'draft' && (
                             <div style={{ gridColumn: '1 / -1' }}>
                                 {!showSuspendForm ? (
                                     <button className="btn-secondary" onClick={() => setShowSuspendForm(true)} style={{ fontSize: 13 }}>
@@ -1310,10 +1360,10 @@ export default function RunDetailPage() {
                                             ))}
                                         </div>
                                         <textarea value={pendingNote} onChange={e => setPendingNote(e.target.value)}
-                                            rows={2} placeholder={locale === 'ja' ? '保留メモ（任意）' : 'Suspension note (optional)'}
+                                            rows={2} placeholder={locale === 'ja' ? '保留メモ（必須）' : 'Suspension note (required)'}
                                             style={{ width: '100%', padding: '8px 10px', borderRadius: 8, border: '1px solid #e2e8f0', fontSize: 13, resize: 'none', marginBottom: 10 }} />
                                         <div style={{ display: 'flex', gap: 8 }}>
-                                            <button className="btn-primary" onClick={handleSuspend} disabled={suspending} style={{ fontSize: 13, background: '#f59e0b', borderColor: '#f59e0b' }}>
+                                            <button className="btn-primary" onClick={handleSuspend} disabled={suspending || !pendingNote.trim()} style={{ fontSize: 13, background: '#f59e0b', borderColor: '#f59e0b' }}>
                                                 {suspending ? '...' : (locale === 'ja' ? '保留にする' : 'Suspend')}
                                             </button>
                                             <button className="btn-secondary" onClick={() => setShowSuspendForm(false)} style={{ fontSize: 13 }}>

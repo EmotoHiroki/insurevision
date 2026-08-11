@@ -67,6 +67,14 @@ for f in "${DIR}"/*_check*.sql; do
             echo "  [SKIP] ${b}（実オブジェクト作成試験。分離検証環境で個別に実行）"
             SKIPPED=$((SKIPPED + 1))
             continue ;;
+        # 状態遷移検証は検査用の run・operator を作成して実際に UPDATE を試みる。
+        # 全操作は単一トランザクション内で行い最後に RAISE EXCEPTION で
+        # ロールバックするため何も残らないが、書き込みを伴うため
+        # 029 と同じ扱いとし、本番では実行しない（分離検証環境で個別に実行）。
+        070_071_state_transition_check.sql)
+            echo "  [SKIP] ${b}（状態遷移試験。書き込みを伴うため分離検証環境で個別に実行）"
+            SKIPPED=$((SKIPPED + 1))
+            continue ;;
     esac
     case " ${SEEN} " in
         *" ${b} "*) continue ;;

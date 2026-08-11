@@ -17,6 +17,13 @@ import {
     type IndividualPropertyAttributes,
     type CorporatePropertyAttributes,
 } from '@/lib/insurance/property'
+import {
+    canSuspend,
+    canResume,
+    validateSuspendInput,
+    interpretUpdateResult,
+    shouldShowSuccess,
+} from '@/lib/insurance/suspension'
 
 describe('ownership types (個人所有形態)', () => {
     it('exactly 3 ownership types with unique codes', () => {
@@ -345,5 +352,116 @@ describe('第6段階: property_count の正整数検査（田島 2026-07-21）',
         expect(bad.property_count).toBeNull()       // 2 へ丸めない
         expect(bad.schedule_reference).toBeNull()
         expect(bad.schedule_acknowledged).toBeNull()
+    })
+})
+
+// =====================================================================
+// 田島様2026-08-10ご指摘②③ / 2026-08-11ご判断（案B採用）への対応
+//   保留は draft からのみ。保留3項目すべて必須。
+//   DB更新の error に加え「更新0件」も成功扱いしない。
+// DB側の強制は migration 070・071 で二重に担保している。
+// =====================================================================
+
+describe('保留の開始可否（2026-08-11ご判断: draft からのみ）', () => {
+    it('draft からは保留できる', () => {
+        expect(canSuspend('draft')).toBe(true)
+    })
+
+    it('post_record_pending からは保留できない（今回の是正の中心）', () => {
+        expect(canSuspend('post_record_pending')).toBe(false)
+    })
+
+    it('確定済み・アーカイブ済み・保留中からは保留できない', () => {
+        expect(canSuspend('finalized')).toBe(false)
+        expect(canSuspend('archived')).toBe(false)
+        expect(canSuspend('suspended')).toBe(false)
+    })
+
+    it('再開できるのは保留中のみ', () => {
+        expect(canResume('suspended')).toBe(true)
+        expect(canResume('draft')).toBe(false)
+        expect(canResume('post_record_pending')).toBe(false)
+        expect(canResume('finalized')).toBe(false)
+    })
+})
+
+describe('保留入力の検証（ご指摘②: 3項目すべて必須）', () => {
+    it('種別とメモが揃っていれば通る', () => {
+        expect(validateSuspendInput({
+            runStatus: 'draft', suspensionType: 'mid_session', pendingNote: '理由',
+        })).toEqual({ ok: true })
+    })
+
+    it('保留メモが空文字なら拒否する', () => {
+        expect(validateSuspendInput({
+            runStatus: 'draft', suspensionType: 'mid_session', pendingNote: '',
+        })).toEqual({ ok: false, reason: 'note_required' })
+    })
+
+    it('保留メモが空白のみなら拒否する（trim後に空）', () => {
+        expect(validateSuspendInput({
+            runStatus: 'draft', suspensionType: 'mid_session', pendingNote: '   \n\t ',
+        })).toEqual({ ok: false, reason: 'note_required' })
+    })
+
+    it('保留メモが null なら拒否する', () => {
+        expect(validateSuspendInput({
+            runStatus: 'draft', suspensionType: 'condition_adjustment', pendingNote: null,
+        })).toEqual({ ok: false, reason: 'note_required' })
+    })
+
+    it('保留種別が未指定なら拒否する', () => {
+        expect(validateSuspendInput({
+            runStatus: 'draft', suspensionType: null, pendingNote: '理由',
+        })).toEqual({ ok: false, reason: 'invalid_type' })
+    })
+
+    it('保留種別が許可値以外なら拒否する', () => {
+        expect(validateSuspendInput({
+            runStatus: 'draft', suspensionType: 'something_else', pendingNote: '理由',
+        })).toEqual({ ok: false, reason: 'invalid_type' })
+    })
+
+    it('post_record_pending では入力が揃っていても拒否する', () => {
+        expect(validateSuspendInput({
+            runStatus: 'post_record_pending', suspensionType: 'mid_session', pendingNote: '理由',
+        })).toEqual({ ok: false, reason: 'not_suspendable' })
+    })
+})
+
+describe('DB更新結果の解釈（ご指摘③: 0件更新を成功扱いしない）', () => {
+    it('errorが無く1件更新なら成功', () => {
+        expect(interpretUpdateResult({ error: null, affectedRows: 1 }))
+            .toEqual({ ok: true })
+    })
+
+    it('errorがあれば失敗', () => {
+        expect(interpretUpdateResult({ error: new Error('rejected'), affectedRows: 1 }))
+            .toEqual({ ok: false, reason: 'error' })
+    })
+
+    it('DBが拒否した場合（トリガーのRAISE）は失敗', () => {
+        expect(interpretUpdateResult({
+            error: { code: 'P0001', message: 'transition is not permitted' },
+            affectedRows: 0,
+        })).toEqual({ ok: false, reason: 'error' })
+    })
+
+    it('errorが無くても0件更新なら失敗（競合・RLS不一致・対象行なし）', () => {
+        expect(interpretUpdateResult({ error: null, affectedRows: 0 }))
+            .toEqual({ ok: false, reason: 'no_rows' })
+    })
+
+    it('affectedRowsがnull/undefinedでも失敗として扱う', () => {
+        expect(interpretUpdateResult({ error: null, affectedRows: null }))
+            .toEqual({ ok: false, reason: 'no_rows' })
+        expect(interpretUpdateResult({ error: null, affectedRows: undefined }))
+            .toEqual({ ok: false, reason: 'no_rows' })
+    })
+
+    it('成功トーストは成功時のみ表示する', () => {
+        expect(shouldShowSuccess(interpretUpdateResult({ error: null, affectedRows: 1 }))).toBe(true)
+        expect(shouldShowSuccess(interpretUpdateResult({ error: null, affectedRows: 0 }))).toBe(false)
+        expect(shouldShowSuccess(interpretUpdateResult({ error: new Error('x'), affectedRows: 1 }))).toBe(false)
     })
 })
